@@ -17,7 +17,6 @@
 
 package org.jaydebeapiarrow.extension;
 
-import java.math.RoundingMode;
 import java.util.Calendar;
 import java.sql.Types;
 
@@ -25,30 +24,14 @@ import org.apache.arrow.adapter.jdbc.JdbcFieldInfo;
 import org.apache.arrow.adapter.jdbc.JdbcToArrowConfig;
 import org.apache.arrow.adapter.jdbc.JdbcToArrowUtils;
 import org.apache.arrow.adapter.jdbc.consumer.JdbcConsumer;
-import org.apache.arrow.adapter.jdbc.consumer.ArrayConsumer;
-import org.apache.arrow.adapter.jdbc.consumer.BigIntConsumer;
-import org.apache.arrow.adapter.jdbc.consumer.BinaryConsumer;
-import org.apache.arrow.adapter.jdbc.consumer.BitConsumer;
-import org.apache.arrow.adapter.jdbc.consumer.DecimalConsumer;
-import org.apache.arrow.adapter.jdbc.consumer.DoubleConsumer;
-import org.apache.arrow.adapter.jdbc.consumer.FloatConsumer;
-import org.apache.arrow.adapter.jdbc.consumer.IntConsumer;
-import org.apache.arrow.adapter.jdbc.consumer.MapConsumer;
-import org.apache.arrow.adapter.jdbc.consumer.NullConsumer;
-import org.apache.arrow.adapter.jdbc.consumer.SmallIntConsumer;
-import org.apache.arrow.adapter.jdbc.consumer.TinyIntConsumer;
-import org.apache.arrow.adapter.jdbc.consumer.VarCharConsumer;
 
 import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.types.pojo.ArrowType;
-import org.apache.arrow.vector.complex.ListVector;
-import org.apache.arrow.vector.complex.MapVector;
 
 import org.apache.arrow.vector.types.TimeUnit;
 
 public class OverriddenConsumer {
 
-    private static final int JDBC_ARRAY_VALUE_COLUMN = 2;
     private Calendar calendar;
 
     public OverriddenConsumer(Calendar calendar) {
@@ -76,39 +59,15 @@ public class OverriddenConsumer {
         final Calendar calendar = config.getCalendar();
 
         switch (arrowType.getTypeID()) {
-            case Bool:
-                return BitConsumer.createConsumer((BitVector) vector, columnIndex, nullable);
-            case Int:
-                switch (((ArrowType.Int) arrowType).getBitWidth()) {
-                    case 8:
-                        return TinyIntConsumer.createConsumer((TinyIntVector) vector, columnIndex, nullable);
-                    case 16:
-                        return SmallIntConsumer.createConsumer((SmallIntVector) vector, columnIndex, nullable);
-                    case 32:
-                        return IntConsumer.createConsumer((IntVector) vector, columnIndex, nullable);
-                    case 64:
-                        return BigIntConsumer.createConsumer((BigIntVector) vector, columnIndex, nullable);
-                    default:
-                        return null;
-                }
-            case Decimal:
-                final RoundingMode bigDecimalRoundingMode = config.getBigDecimalRoundingMode();
-                return DecimalConsumer.createConsumer((DecimalVector) vector, columnIndex, nullable, bigDecimalRoundingMode);
-            case FloatingPoint:
-                switch (((ArrowType.FloatingPoint) arrowType).getPrecision()) {
-                    case SINGLE:
-                        return FloatConsumer.createConsumer((Float4Vector) vector, columnIndex, nullable);
-                    case DOUBLE:
-                        return DoubleConsumer.createConsumer((Float8Vector) vector, columnIndex, nullable);
-                    default:
-                        return null;
-                }
-            case Utf8:
-            case LargeUtf8:
-                return VarCharConsumer.createConsumer((VarCharVector) vector, columnIndex, nullable);
-            case Binary:
-            case LargeBinary:
-                return BinaryConsumer.createConsumer((VarBinaryVector) vector, columnIndex, nullable);
+            /*
+             * We override Date, Time, and Timestamp consumers because the default consumers
+             * in the Apache Arrow JDBC library do not provide the specific precision or
+             * calendar-based conversion logic we require.
+             * 
+             * Most notably, the standard Timestamp consumer does not handle microsecond
+             * precision natively in the way this project expects, and our custom 
+             * implementations ensure consistent behavior across different JDBC drivers.
+             */
             case Date:
                 return DateConsumer.createConsumer((DateDayVector) vector, columnIndex, nullable, calendar);
             case Time:
@@ -120,18 +79,8 @@ public class OverriddenConsumer {
                 else {
                     return TimestampTZConsumer.createConsumer((TimeStampMicroTZVector) vector, columnIndex, nullable, calendar);
                 }
-            case List:
-                FieldVector childVector = ((ListVector) vector).getDataVector();
-                JdbcConsumer delegate = getConsumer(childVector.getField().getType(), JDBC_ARRAY_VALUE_COLUMN,
-                        childVector.getField().isNullable(), childVector, config);
-                return ArrayConsumer.createConsumer((ListVector) vector, delegate, columnIndex, nullable);
-            case Map:
-                return MapConsumer.createConsumer((MapVector) vector, columnIndex, nullable);
-            case Null:
-                return new NullConsumer((NullVector) vector);
             default:
-                // no-op, shouldn't get here
-                throw new UnsupportedOperationException("No consumer for Arrow type: " + arrowType);
-            }
+                return JdbcToArrowUtils.getConsumer(arrowType, columnIndex, nullable, vector, config);
         }
     }
+}
