@@ -21,20 +21,28 @@
 .. image:: https://img.shields.io/pypi/dm/JayDeBeApi.svg
     :target: https://pypi.python.org/pypi/JayDeBeApi/
 
-The JayDeBeApi module allows you to connect from Python code to
+The JayDeBeApiArrow module allows you to connect from Python code to
 databases using Java `JDBC
 <http://java.sun.com/products/jdbc/overview.html>`_. It provides a
 Python DB-API_ v2.0 to that database.
 
-It works on ordinary Python (cPython) using the JPype_ Java
-integration or on `Jython <http://www.jython.org/>`_ to make use of
-the Java JDBC driver.
+**This is a fork of the original** `JayDeBeApi <https://github.com/baztian/jaydebeapi>`_ **project.**
 
-In contrast to zxJDBC from the Jython project JayDeBeApi let's you
-access a database with Jython AND Python with only minor code
-modifications. JayDeBeApi's future goal is to provide a unique and
-fast interface to different types of JDBC-Drivers through a flexible
-plug-in mechanism.
+**Key Differences in this Fork:**
+
+1. **High Performance with Apache Arrow:**
+   The primary goal of this fork is to significantly improve data fetch performance.
+   Instead of iterating through JDBC ResultSets row-by-row in Python (which has high overhead),
+   this library uses a custom Java extension (`arrow-jdbc-extension`) to convert JDBC data
+   into **Apache Arrow** record batches directly within the JVM. These batches are then
+   efficiently transferred to Python.
+
+2. **Modernization:**
+   *   **Python 3 Only:** Support for Python 2 has been removed.
+   *   **JPype Only:** Support for Jython has been removed to focus on the CPython + JPype architecture.
+   *   **Strict Typing:** Enforces stricter typing for Decimal and temporal types.
+
+It works on ordinary Python (cPython) using the JPype_ Java integration.
 
 .. contents::
 
