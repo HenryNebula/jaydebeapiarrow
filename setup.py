@@ -29,7 +29,7 @@ package_name = 'JayDeBeApiArrow'
 setup(
     # basic package data
     name=package_name,
-    version='0.0.2',
+    version='0.0.3',
     author='HenryNebula',
     author_email='henrynebula0710@gmail.com',
     license='GNU LGPL',
