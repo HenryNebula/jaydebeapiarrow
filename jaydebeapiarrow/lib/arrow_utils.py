@@ -46,33 +46,42 @@ def read_rows_from_arrow_iterator(it, nrows=-1):
 
 
 def create_pyarrow_batches_from_list(rows):
-    # TODO: add shape checks
-    if len(rows) == 0:
+    if not rows:
         return []
     
+    if not isinstance(rows[0], (list, tuple)):
+        # wrap single column values in a list
+        rows = [rows, ]
+
     n_cols = len(rows[0])
     column_wise = [[] for _ in range(n_cols)]
-    for row in rows:
-        for i, col in enumerate(row):
-            column_wise[i].append(col)
     
+    for r_idx, row in enumerate(rows):
+        # Shape Check: Ensure consistency across all rows
+        if len(row) != n_cols:
+            raise ValueError(
+                f"Shape mismatch at row {r_idx}. "
+                f"Expected {n_cols} columns, got {len(row)}."
+            )
+
+        for c_idx, col in enumerate(row):
+            column_wise[c_idx].append(col)
+
     batch = pa.RecordBatch.from_pydict(
         {"col_{}".format(i): column_wise[i] for i in range(n_cols)}
     )
     return [batch, ]
 
 
-def add_pyarrow_batches_to_statement(batches, prepared_statement):
+def add_pyarrow_batches_to_statement(batches, prepared_statement, is_batch=False):
     import jpype.imports
     from org.jaydebeapiarrow.extension import JDBCUtils
 
     if len(batches) == 0:
         return
 
-    print(batches[0].schema)
     reader = pa.RecordBatchReader.from_batches(batches[0].schema, batches)
     c_stream = arrow_c.new("struct ArrowArrayStream*")
     c_stream_ptr = int(arrow_c.cast("uintptr_t", c_stream))
     reader._export_to_c(c_stream_ptr)
-    with tempfile.NamedTemporaryFile() as temp:
-        JDBCUtils.prepareStatementFromStream(temp.name, c_stream_ptr, prepared_statement)
+    JDBCUtils.prepareStatementFromStream(c_stream_ptr, prepared_statement, is_batch)
