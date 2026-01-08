@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.jaydebeapiarrow.extension;
+package org.jaydebeapiarrow.extension.consumer;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -23,6 +23,8 @@ import java.sql.SQLException;
 import org.apache.arrow.adapter.jdbc.consumer.JdbcConsumer;
 import org.apache.arrow.adapter.jdbc.consumer.BaseConsumer;
 import org.apache.arrow.vector.TimeMilliVector;
+
+import org.jaydebeapiarrow.extension.TimeUtils;
 
 
 public abstract class TimeConsumer {

@@ -15,9 +15,10 @@
  * limitations under the License.
  */
 
-package org.jaydebeapiarrow.extension;
+package org.jaydebeapiarrow.extension.consumer;
 
 import java.util.Calendar;
+import java.util.TimeZone;
 import java.sql.Types;
 
 import org.apache.arrow.adapter.jdbc.JdbcFieldInfo;
@@ -27,36 +28,32 @@ import org.apache.arrow.adapter.jdbc.consumer.JdbcConsumer;
 
 import org.apache.arrow.vector.*;
 import org.apache.arrow.vector.types.pojo.ArrowType;
-
+import org.apache.arrow.vector.types.pojo.ArrowType.Timestamp;
 import org.apache.arrow.vector.types.TimeUnit;
 
 public class OverriddenConsumer {
 
-    private Calendar calendar;
+    private static final Calendar UTC_CALENDAR = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
 
-    public OverriddenConsumer(Calendar calendar) {
-        this.calendar = calendar;
+    public OverriddenConsumer() {
     }
 
     public ArrowType getJdbcToArrowTypeConverter(final JdbcFieldInfo fieldInfo) {
         switch (fieldInfo.getJdbcType()) {
-            case Types.TIMESTAMP:
-                final String timezone;
-                if (this.calendar != null) {
-                    timezone = this.calendar.getTimeZone().getID();
-                } else {
-                    timezone = null;
-                }
+            case Types.TIMESTAMP_WITH_TIMEZONE:
+                final String timezone = Calendar.getInstance(TimeZone.getTimeZone("UTC")).getTimeZone().getID();
                 return new ArrowType.Timestamp(TimeUnit.MICROSECOND, timezone);
+            case Types.TIMESTAMP:
+                return new ArrowType.Timestamp(TimeUnit.MICROSECOND, null);
             default:
-                return JdbcToArrowUtils.getArrowTypeFromJdbcType(fieldInfo, this.calendar);
+                return JdbcToArrowUtils.getArrowTypeFromJdbcType(fieldInfo, null);
         }
     }
 
     public static JdbcConsumer getConsumer(ArrowType arrowType, int columnIndex, boolean nullable,
                                     FieldVector vector, JdbcToArrowConfig config) {
 
-        final Calendar calendar = config.getCalendar();
+        Calendar calendar = UTC_CALENDAR;
 
         switch (arrowType.getTypeID()) {
             /*
@@ -73,7 +70,7 @@ public class OverriddenConsumer {
             case Time:
                 return TimeConsumer.createConsumer((TimeMilliVector) vector, columnIndex, nullable);
             case Timestamp:
-                if (config.getCalendar() == null) {
+                if (((ArrowType.Timestamp) arrowType).getTimezone() == null) {
                     return TimestampConsumer.createConsumer((TimeStampMicroVector) vector, columnIndex, nullable);
                 }
                 else {

@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.jaydebeapiarrow.extension;
+package org.jaydebeapiarrow.extension.consumer;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -27,6 +27,9 @@ import org.apache.arrow.adapter.jdbc.consumer.BaseConsumer;
 import org.apache.arrow.adapter.jdbc.consumer.JdbcConsumer;
 import org.apache.arrow.vector.DateDayVector;
 import org.apache.arrow.vector.DateMilliVector;
+
+import org.jaydebeapiarrow.extension.ExplicitTypeMapper;
+import org.jaydebeapiarrow.extension.TimeUtils;
 
 public class DateConsumer {
 
