@@ -39,28 +39,22 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 class IntegrationTestBase(object):
 
-    DB_SUPPORT_TEMPORAL_TYPE = True
-    DBAPI = namedtuple('DBAPI', [
-        'Date',
-        'Time',
-        'Timestamp',
-        'Binary'
-    ])
+    JDBC_SUPPORT_TEMPORAL_TYPE = True
 
     def _cast_datetime(self, datetime_str, fmt=r'%Y-%m-%d %H:%M:%S'):
-        if self.DB_SUPPORT_TEMPORAL_TYPE and type(datetime_str) == str:
+        if self.JDBC_SUPPORT_TEMPORAL_TYPE and type(datetime_str) == str:
             return datetime.strptime(datetime_str, fmt)
         else:
             return datetime_str
 
     def _cast_time(self, time_str, fmt=r'%H:%M:%S'):
-        if self.DB_SUPPORT_TEMPORAL_TYPE and type(time_str) == str:
+        if self.JDBC_SUPPORT_TEMPORAL_TYPE and type(time_str) == str:
             return datetime.strptime(time_str, fmt).time()
         else:
             return time_str
 
     def _cast_date(self, date_str, fmt=r'%Y-%m-%d'):
-        if self.DB_SUPPORT_TEMPORAL_TYPE and type(date_str) == str:
+        if self.JDBC_SUPPORT_TEMPORAL_TYPE and type(date_str) == str:
             return datetime.strptime(date_str, fmt).date()
         else:
             return date_str
@@ -82,17 +76,8 @@ class IntegrationTestBase(object):
             for i in stmts:
                 cursor.execute(i)
 
-    def setUpDBAPI(self):
-        self.dbapi = self.DBAPI(
-            Date=self.db.Date,
-            Time=self.db.Time,
-            Timestamp=self.db.Timestamp,
-            Binary=self.db.Binary
-        )
-
     def setUp(self):
-        (self.db, self.conn) = self.connect()
-        self.setUpDBAPI()
+        (self.dbapi, self.conn) = self.connect()
         self.setUpSql()
 
     def setUpSql(self):
@@ -166,6 +151,21 @@ class IntegrationTestBase(object):
             result = cursor.fetchone()
         self.assertIsNone(result)
 
+    def test_execute_and_fetchone_consecutive(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING " \
+                        "from ACCOUNT order by ACCOUNT_NO")
+            result1 = cursor.fetchone()
+            result2 = cursor.fetchone()
+        
+        self.assertEqual(result1, (
+            self._cast_datetime('2009-09-10 14:15:22.123456', r'%Y-%m-%d %H:%M:%S.%f'),
+            18, Decimal('12.4'), None))
+        
+        self.assertEqual(result2, (
+            self._cast_datetime('2009-09-11 14:15:22.123456', r'%Y-%m-%d %H:%M:%S.%f'),
+            19, Decimal('12.9'), Decimal('1')))
+
     def test_execute_and_fetchmany(self):
         with self.conn.cursor() as cursor:
             cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING " \
@@ -184,11 +184,10 @@ class IntegrationTestBase(object):
     def test_executemany(self):
         stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE) " \
                "values (?, ?, ?)"
-        d = self.dbapi
         parms = (
-            ( d.Timestamp(2009, 9, 11, 14, 15, 22, 123450), 20, 13.1 ),
-            ( d.Timestamp(2009, 9, 11, 14, 15, 22, 123451), 21, 13.2 ),
-            ( d.Timestamp(2009, 9, 11, 14, 15, 22, 123452), 22, 13.3 ),
+            ( self.dbapi.Timestamp(2009, 9, 11, 14, 15, 22, 123450), 20, 13.1 ),
+            ( self.dbapi.Timestamp(2009, 9, 11, 14, 15, 22, 123451), 21, 13.2 ),
+            ( self.dbapi.Timestamp(2009, 9, 11, 14, 15, 22, 123452), 22, 13.3 ),
             )
         with self.conn.cursor() as cursor:
             cursor.executemany(stmt, parms)
@@ -198,13 +197,12 @@ class IntegrationTestBase(object):
         stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, " \
                "BLOCKING, DBL_COL, OPENED_AT, VALID, PRODUCT_NAME) " \
                "values (?, ?, ?, ?, ?, ?, ?, ?)"
-        d = self.dbapi
-        account_id = d.Timestamp(2010, 1, 26, 14, 31, 59)
+        account_id = self.dbapi.Timestamp(2010, 1, 26, 14, 31, 59)
         account_no = 20
         balance = Decimal('1.2')
         blocking = 10.0
         dbl_col = 3.5
-        opened_at = d.Date(1908, 2, 27)
+        opened_at = self.dbapi.Date(1908, 2, 27)
         valid = True
         product_name = u'Savings account'
         parms = (account_id, account_no, balance, blocking, dbl_col,
@@ -229,11 +227,10 @@ class IntegrationTestBase(object):
         stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, " \
                "OPENED_AT_TIME) " \
                "values (?, ?, ?, ?)"
-        d = self.dbapi
-        account_id = d.Timestamp(2010, 1, 26, 14, 31, 59)
+        account_id = self.dbapi.Timestamp(2010, 1, 26, 14, 31, 59)
         account_no = 20
         balance = 1.2
-        opened_at_time = d.Time(13, 59, 59)
+        opened_at_time = self.dbapi.Time(13, 59, 59)
         parms = (account_id, account_no, balance, opened_at_time)
         with self.conn.cursor() as cursor:
             cursor.execute(stmt, parms)
@@ -253,34 +250,26 @@ class IntegrationTestBase(object):
     def test_execute_different_rowcounts(self):
         stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE) " \
                "values (?, ?, ?)"
-        d = self.dbapi
         parms = (
-            ( d.Timestamp(2009, 9, 11, 14, 15, 22, 123450), 20, 13.1 ),
-            ( d.Timestamp(2009, 9, 11, 14, 15, 22, 123452), 22, 13.3 ),
+            ( self.dbapi.Timestamp(2009, 9, 11, 14, 15, 22, 123450), 20, 13.1 ),
+            ( self.dbapi.Timestamp(2009, 9, 11, 14, 15, 22, 123452), 22, 13.3 ),
             )
         with self.conn.cursor() as cursor:
             cursor.executemany(stmt, parms)
             self.assertEqual(cursor.rowcount, 2)
-            parms = ( d.Timestamp(2009, 9, 11, 14, 15, 22, 123451), 21, 13.2 )
+            parms = ( self.dbapi.Timestamp(2009, 9, 11, 14, 15, 22, 123451), 21, 13.2 )
             cursor.execute(stmt, parms)
             self.assertEqual(cursor.rowcount, 1)
             cursor.execute("select * from ACCOUNT")
             self.assertEqual(cursor.rowcount, -1)
-
-class SqliteTestBase(IntegrationTestBase):
-
-    FORCE_TEMPORAL_AS_STR_IN_QUERY = False
-
-    def setUpSql(self):
-        self.sql_file(os.path.join(_THIS_DIR, 'data', 'create.sql'))
-        self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert.sql'))
-
+    
     def test_execute_type_blob(self):
         stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, " \
                "STUFF) values (?, ?, ?, ?)"
         binary_stuff = 'abcdef'.encode('UTF-8')
+        account_id = self.dbapi.Timestamp(2009, 9, 11, 14, 15, 22, 123450)
         stuff = self.dbapi.Binary(binary_stuff)
-        parms = ('2009-09-11 14:15:22.123450', 20, 13.1, stuff)
+        parms = (account_id, 20, 13.1, stuff)
         with self.conn.cursor() as cursor:
             cursor.execute(stmt, parms)
             stmt = "select STUFF from ACCOUNT where ACCOUNT_NO = ?"
@@ -290,49 +279,15 @@ class SqliteTestBase(IntegrationTestBase):
         value = result[0]
         self.assertEqual(value, memoryview(binary_stuff))
 
-    def test_execute_types(self):
-        stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, " \
-               "BLOCKING, DBL_COL, OPENED_AT, VALID, PRODUCT_NAME) " \
-               "values (?, ?, ?, ?, ?, ?, ?, ?)"
-        d = self.dbapi
-        account_id = d.Timestamp(2010, 1, 26, 14, 31, 59)
-        account_no = 20
-        balance = Decimal('1.2')
-        blocking = Decimal('10.0')
-        dbl_col = 3.5
-        opened_at = d.Date(2008, 2, 27)
-        valid = 1
-        product_name = u'Savings account'
-        parms = (account_id, account_no, balance, blocking, dbl_col,
-                 opened_at, valid, product_name)
-        with self.conn.cursor() as cursor:
-            cursor.execute(stmt, parms)
-            if self.FORCE_TEMPORAL_AS_STR_IN_QUERY:
-                account_id_selector = "datetime(ACCOUNT_ID)"
-                opened_at_selector = "date(OPENED_AT)"
-            else:
-                account_id_selector = "ACCOUNT_ID"
-                opened_at_selector = "OPENED_AT"
+class SqliteTestBase(IntegrationTestBase):
 
-            stmt = "select {} as ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING, ".format(account_id_selector)  + \
-                   "DBL_COL, {} as OPENED_AT, VALID, PRODUCT_NAME ".format(opened_at_selector) + \
-                   "from ACCOUNT where ACCOUNT_NO = ?"
-            parms = (20,)
-            cursor.execute(stmt, parms)
-            result = cursor.fetchone()
-
-        exp = (
-            self._cast_datetime(account_id, r'%Y-%m-%d %H:%M:%S'),
-            account_no, balance, blocking, dbl_col,
-            self._cast_date(opened_at, r'%Y-%m-%d'),
-            valid, product_name
-        )
-        self.assertEqual(result, exp)
-
+    def setUpSql(self):
+        self.sql_file(os.path.join(_THIS_DIR, 'data', 'create.sql'))
+        self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert.sql'))
 
 class SqlitePyTest(SqliteTestBase, unittest.TestCase):
 
-    DB_SUPPORT_TEMPORAL_TYPE = True
+    JDBC_SUPPORT_TEMPORAL_TYPE = True
 
     class ConnectionWithClosing:
         def __init__(self, conn):
@@ -354,28 +309,56 @@ class SqlitePyTest(SqliteTestBase, unittest.TestCase):
 
 class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
 
-    DB_SUPPORT_TEMPORAL_TYPE = False
-    FORCE_TEMPORAL_AS_STR_IN_QUERY = True
+    JDBC_SUPPORT_TEMPORAL_TYPE = False
 
     def connect(self):
         #http://bitbucket.org/xerial/sqlite-jdbc
         # sqlite-jdbc-3.7.2.jar
         driver, url = 'org.sqlite.JDBC', 'jdbc:sqlite::memory:'
-        # db2jcc
-        # driver, driver_args = 'com.ibm.db2.jcc.DB2Driver', \
-        #    ['jdbc:db2://4.100.73.81:50000/db2t', 'user', 'passwd']
-        # driver from http://www.ch-werner.de/javasqlite/ seems to be
-        # crap as it returns decimal values as VARCHAR type
-        # sqlite.jar
-        # driver, driver_args = 'SQLite.JDBCDriver', 'jdbc:sqlite:/:memory:'
-        # Oracle Thin Driver
-        # driver, driver_args = 'oracle.jdbc.OracleDriver', \
-        #     ['jdbc:oracle:thin:@//hh-cluster-scan:1521/HH_TPP',
-        #      'user', 'passwd']
-        return jaydebeapiarrow, jaydebeapiarrow.connect(driver, url)
+        properties = {
+            "date_string_format": "yyyy-MM-dd HH:mm:ss"
+        }
+        return jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args=properties)
 
-    def test_execute_type_blob(self):
-        return super(SqliteXerialTest, self).test_execute_type_blob()
+    def test_execute_types(self):
+        """
+        xerial/sqlite-jdbc has some issues with type mapping:
+        1. Timestamp has inconsistent types: JDBC returns it as a VARCHAR, while it's defined as a TIMESTAMP in the DB
+        2. Default date_string_format does not handle ISO Date (without microseconds)
+        """
+        stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, " \
+               "BLOCKING, DBL_COL, OPENED_AT, VALID, PRODUCT_NAME) " \
+               "values (?, ?, ?, ?, ?, ?, ?, ?)"
+        account_id = self.dbapi.Timestamp(2010, 1, 26, 14, 31, 59)
+        account_no = 20
+        balance = Decimal('1.2')
+        blocking = Decimal('10.0')
+        dbl_col = 3.5
+        opened_at = self.dbapi.Timestamp(2008, 2, 27, 0, 0, 0) 
+        valid = True
+        product_name = u'Savings account'
+        parms = (
+            account_id,
+            account_no, balance, blocking, dbl_col,
+            opened_at,
+            valid, product_name
+        )
+        with self.conn.cursor() as cursor:
+            cursor.execute(stmt, parms)
+            stmt = "select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING, " \
+                "DBL_COL, OPENED_AT, VALID, PRODUCT_NAME " \
+                "from ACCOUNT where ACCOUNT_NO = ?"
+            parms = (20,)
+            cursor.execute(stmt, parms)
+            result = cursor.fetchone()
+
+        exp = (
+            account_id.strftime(r'%Y-%m-%d %H:%M:%S'),
+            account_no, balance, blocking, dbl_col,
+            opened_at.date(),
+            valid, product_name
+        )
+        self.assertEqual(result, exp)
 
 class HsqldbTest(IntegrationTestBase, unittest.TestCase):
 
@@ -411,13 +394,6 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
         else:
             return db, conn
 
-    def setUpDBAPI(self):
-        self.dbapi = self.DBAPI(
-            Date=self.db.TypedDate,
-            Time=self.db.TypedTime,
-            Timestamp=self.db.TypedTimestamp,
-            Binary=self.db.Binary,
-        )
 
     def setUpSql(self):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_postgres.sql'))
@@ -442,14 +418,6 @@ class MySQLTest(IntegrationTestBase, unittest.TestCase):
             self.skipTest("Can not connect with MySQL. Please check if the instance is up and running.")
         else:
             return db, conn
-
-    def setUpDBAPI(self):
-        self.dbapi = self.DBAPI(
-            Date=self.db.TypedDate,
-            Time=self.db.TypedTime,
-            Timestamp=self.db.TypedTimestamp,
-            Binary=self.db.Binary,
-        )
 
     def setUpSql(self):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_mysql.sql'))

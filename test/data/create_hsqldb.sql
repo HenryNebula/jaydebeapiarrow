@@ -8,6 +8,7 @@ create table Account (
 "OPENED_AT_TIME" TIME,
 "VALID" BOOLEAN,
 "PRODUCT_NAME" VARCHAR(50),
+"STUFF" BLOB,
 primary key ("ACCOUNT_ID")
 );
 

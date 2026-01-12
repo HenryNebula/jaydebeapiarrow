@@ -35,7 +35,7 @@ setup(
     license='GNU LGPL',
     url='https://github.com/HenryNebula/jaydebeapiarrow.git',
     description='Use JDBC database drivers from Python 3 with a DB-API, accelerated with Apache Arrow.',
-    long_description=open('README.rst').read(),
+    long_description=open('README.md').read(),
     keywords = ('db api java jdbc bridge connect sql jpype apache-arrow'),
     classifiers = [
         'Development Status :: 3 - Alpha',

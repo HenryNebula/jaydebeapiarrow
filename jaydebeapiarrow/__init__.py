@@ -36,7 +36,8 @@ from jaydebeapiarrow.lib.arrow_utils import \
     convert_jdbc_rs_to_arrow_iterator, \
     read_rows_from_arrow_iterator, \
     create_pyarrow_batches_from_list, \
-    add_pyarrow_batches_to_statement
+    add_pyarrow_batches_to_statement, \
+    fetch_next_batch
 
 
 def reraise(tp, value, tb=None):
@@ -56,8 +57,6 @@ _jdbc_name_to_const = None
 _jdbc_const_to_name = None
 
 _jdbc_connect = None
-
-_java_array_byte = None
 
 _handle_sql_exception = None
 
@@ -105,7 +104,7 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
         global old_jpype
         if hasattr(jpype, '__version__'):
             try:
-                ver_match = re.match('\d+\.\d+', jpype.__version__)
+                ver_match = re.match(r'\d+\.\d+', jpype.__version__)
                 if ver_match:
                     jpype_ver = float(ver_match.group(0))
                     if jpype_ver < 0.7:
@@ -117,10 +116,15 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
         else:
             jpype.startJVM(jvm_path, *args, ignoreUnrecognized=True,
                            convertStrings=True)
-    if not jpype.isThreadAttachedToJVM():
+    
+    if not jpype.java.lang.Thread.isAttached():
         jpype.attachThreadToJVM()
         jpype.java.lang.Thread.currentThread().setContextClassLoader(jpype.java.lang.ClassLoader.getSystemClassLoader())
-
+    try:
+        import pyarrow.jvm
+    except ImportError as e:
+        raise RuntimeError(f"Failed to import pyarrow.jvm ({e}). Looks like JVM is not started. Thisis required for jaydebeapiarrow to work.")
+    
     # register driver for DriverManager
     jpype.JClass(jclassname)
     if isinstance(driver_args, dict):
@@ -186,22 +190,47 @@ class DBAPITypeObject(object):
             if type_name in DBAPITypeObject._mappings:
                 raise ValueError("Non unique mapping for type '%s'" % type_name)
             DBAPITypeObject._mappings[type_name] = self
-    def __cmp__(self, other):
-        if other in self.values:
-            return 0
-        if other < self.values:
-            return 1
-        else:
-            return -1
+    def __eq__(self, other):
+        if isinstance(other, DBAPITypeObject):
+            return self.group_name == other.group_name
+        if _jdbc_const_to_name is None:
+            return False
+        try:
+            name = _jdbc_const_to_name.get(other)
+        except (KeyError, TypeError):
+            return False
+        return name in self.values
+    def __ne__(self, other):
+        return not self.__eq__(other)
     def __repr__(self):
         return 'DBAPITypeObject(%s)' % ", ".join([repr(i) for i in self.values])
     @classmethod
     def _map_jdbc_type_to_dbapi(cls, jdbc_type_const):
+        global _jdbc_const_to_name
+        if _jdbc_const_to_name is None:
+            import jpype
+            if not jpype.isJVMStarted():
+                return None
+            try:
+                Types = jpype.java.sql.Types
+                _jdbc_const_to_name = {}
+                for field in Types.class_.getFields():
+                    modifiers = field.getModifiers()
+                    if jpype.java.lang.reflect.Modifier.isStatic(modifiers) and \
+                       jpype.java.lang.reflect.Modifier.isPublic(modifiers):
+                        try:
+                            value = int(field.get(None))
+                            _jdbc_const_to_name[value] = field.getName()
+                        except (TypeError, ValueError):
+                            continue
+            except Exception:
+                _jdbc_const_to_name = {}
+
         try:
             type_name = _jdbc_const_to_name[jdbc_type_const]
-        except KeyError:
-            warnings.warn("Unknown JDBC type with constant value %d. "
-                          "Using None as a default type_code." % jdbc_type_const)
+        except (KeyError, TypeError):
+            warnings.warn("Unknown JDBC type with constant value %s. "
+                          "Using None as a default type_code." % str(jdbc_type_const))
             return None
         try:
             return cls._mappings[type_name]
@@ -264,33 +293,27 @@ class NotSupportedError(DatabaseError):
     pass
 
 # DB-API 2.0 Type Objects and Constructors
-import jpype.dbapi2
 
-def _java_sql_blob(data):
-    return _java_array_byte(data)
+def Binary(x):
+    """Construct an object capable of holding a binary (long) string value."""
+    if isinstance(x, str):
+        return x.encode('utf-8')
+    return bytes(x)
 
-Binary = _java_sql_blob
+Date = datetime.date
+Time = datetime.time
+Timestamp = datetime.datetime
 
-def _str_func(func):
-    def to_str(*parms):
-        return str(func(*parms))
-    return to_str
+# Date = datetime.date
 
-def _ts_converter(*parms):
-    if len(parms) >= 7:
-        nano = parms[6] * 1000
-    else:
-        nano = 0
-    return jpype.dbapi2.Timestamp(*parms[:6], nano=nano)
+def DateFromTicks(ticks):
+    return Date(*time.localtime(ticks)[:3])
 
-TypedDate = lambda *parms: jpype.dbapi2.Date(*parms)
-Date = _str_func(datetime.date)
+def TimeFromTicks(ticks):
+    return Time(*time.localtime(ticks)[3:6])
 
-TypedTime = lambda *parms: jpype.dbapi2.Time(*parms)
-Time = _str_func(datetime.time)
-
-TypedTimestamp = lambda *parms: _ts_converter(*parms)
-Timestamp = _str_func(datetime.datetime)
+def TimestampFromTicks(ticks):
+    return Timestamp(*time.localtime(ticks)[:6])
 
 # DB-API 2.0 Module Interface connect constructor
 def connect(jclassname, url, driver_args=None, jars=None, libs=None):
@@ -325,7 +348,7 @@ def connect(jclassname, url, driver_args=None, jars=None, libs=None):
     else:
         libs = []
     jconn = _jdbc_connect(jclassname, url, driver_args, jars, libs)
-    return Connection(jconn)
+    return Connection(jconn, jclassname)
 
 # DB-API 2.0 Connection Object
 class Connection(object):
@@ -341,9 +364,13 @@ class Connection(object):
     DataError = DataError
     NotSupportedError = NotSupportedError
 
-    def __init__(self, jconn):
+    def __init__(self, jconn, jclassname=None):
         self.jconn = jconn
+        self._jclassname = jclassname
         self._closed = False
+        self._stringify_dates = False
+        if self._jclassname and ("sqlite" in self._jclassname.lower()):
+             self._stringify_dates = True
 
     def close(self):
         if self._closed:
@@ -375,15 +402,19 @@ class Connection(object):
 # DB-API 2.0 Cursor Object
 class Cursor(object):
 
-    rowcount = -1
-    _meta = None
-    _prep = None
     _rs = None
-    _rs_initial_fetch = True
     _description = None
+    _iter = None
+    _buffer = None
 
     def __init__(self, connection):
         self._connection = connection
+        self._buffer = []
+        self._prep = None
+
+    @property
+    def connection(self):
+        return self._connection
 
     @property
     def description(self):
@@ -422,9 +453,15 @@ class Cursor(object):
     def _close_last(self):
         """Close the resultset and reset collected meta data.
         """
+        if self._iter:
+            try:
+                self._iter.close()
+            except:
+                pass
+        self._iter = None
+        self._buffer = []
         if self._rs:
             self._rs.close()
-            self._rs_initial_fetch = True
         self._rs = None
         if self._prep:
             self._prep.close()
@@ -437,9 +474,27 @@ class Cursor(object):
     #         # print (i, parameters[i], type(parameters[i]))
     #         prep_stmt.setObject(i + 1, parameters[i])
 
-    def _set_stmt_parms(self, statement, parameters):
+    def _stringify_params(self, params, is_batch):
+        if not params:
+            return params
+        
+        def _to_str(x):
+            if isinstance(x, (datetime.date, datetime.time, datetime.datetime)):
+                return str(x)
+            return x
+            
+        if is_batch:
+            # params is a sequence of sequences
+            return [[_to_str(p) for p in row] for row in params]
+        else:
+            # params is a sequence
+            return [_to_str(p) for p in params]
+
+    def _set_stmt_parms(self, statement, parameters, is_batch=False):
+        if self._connection._stringify_dates:
+             parameters = self._stringify_params(parameters, is_batch)
         batches = create_pyarrow_batches_from_list(parameters)
-        add_pyarrow_batches_to_statement(batches, statement)
+        add_pyarrow_batches_to_statement(batches, statement, is_batch=is_batch)
 
     def execute(self, operation, parameters=None):
         if self._connection._closed:
@@ -448,14 +503,13 @@ class Cursor(object):
             parameters = ()
         self._close_last()
         self._prep = self._connection.jconn.prepareStatement(operation)
-        self._set_stmt_parms(self._prep, parameters)
+        self._set_stmt_parms(self._prep, parameters, is_batch=False)
         try:
             is_rs = self._prep.execute()
         except:
             _handle_sql_exception()
         if is_rs:
             self._rs = self._prep.getResultSet()
-            self._rs_initial_fetch = True
             self._meta = self._rs.getMetaData()
             self.rowcount = -1
         else:
@@ -465,63 +519,85 @@ class Cursor(object):
     def executemany(self, operation, seq_of_parameters):
         self._close_last()
         self._prep = self._connection.jconn.prepareStatement(operation)
-        self._set_stmt_parms(self._prep, seq_of_parameters)
+        self._set_stmt_parms(self._prep, seq_of_parameters, is_batch=True)
         update_counts = self._prep.executeBatch()
         # self._prep.getWarnings() ???
         self.rowcount = sum(update_counts)
         self._close_last()
 
+    def _get_iter(self):
+        if self._iter:
+            return self._iter
+        if not self._rs:
+            raise Error()
+        # Use a reasonable batch size. 
+        # For small reads (fetchone), this might be overhead, but it's safe.
+        # For large reads (fetchall), this is efficient.
+        # Using arraysize or a default.
+        batch_size = max(self.arraysize, 1024)
+        self._iter = convert_jdbc_rs_to_arrow_iterator(self._rs, batch_size=batch_size)
+        return self._iter
+
     def fetchone(self):
         if not self._rs:
             raise Error()
-        # if not self._rs.isBeforeFirst():
-        #     return None
-
-        if self._rs_initial_fetch:
-            self._rs_initial_fetch = False
-        else:
-            return None
-
-        it = convert_jdbc_rs_to_arrow_iterator(self._rs, batch_size=1)
-        row = read_rows_from_arrow_iterator(it, nrows=1)
-        return tuple(*row) if len(row) == 1 else None
+        
+        if self._buffer:
+            return self._buffer.pop(0)
+        
+        it = self._get_iter()
+        rows = fetch_next_batch(it)
+        if rows:
+            self._buffer.extend(rows)
+            return self._buffer.pop(0)
+        
+        return None
 
     def fetchmany(self, size=None):
         if not self._rs:
             raise Error()
-        # if not self._rs.isBeforeFirst():
-        #     return []
-
-        if self._rs_initial_fetch:
-            self._rs_initial_fetch = False
-        else:
-            return []
-
+        
         if size is None:
             size = self.arraysize
-
+        
         assert size > 0, f"Fetchmany expects positive size other than size={size}."
-
-        it = convert_jdbc_rs_to_arrow_iterator(self._rs, size)
-        rows = read_rows_from_arrow_iterator(it, size)
-
-        return rows
+        
+        result = []
+        while len(result) < size:
+            if self._buffer:
+                needed = size - len(result)
+                take = self._buffer[:needed]
+                self._buffer = self._buffer[needed:]
+                result.extend(take)
+            else:
+                it = self._get_iter()
+                rows = fetch_next_batch(it)
+                if not rows:
+                    break
+                self._buffer.extend(rows)
+        
+        return result
 
     def fetchall(self):
         if not self._rs:
             raise Error()
-        # if not self._rs.isBeforeFirst():
-        #     return []
-
-        if self._rs_initial_fetch:
-            self._rs_initial_fetch = False
-        else:
-            return []
         
-        it = convert_jdbc_rs_to_arrow_iterator(self._rs)
-        rows = read_rows_from_arrow_iterator(it)
-
-        return rows
+        result = []
+        if self._buffer:
+            result.extend(self._buffer)
+            self._buffer = []
+            
+        it = self._get_iter()
+        
+        # We can implement a more efficient fetchall if we want to avoid python loops for buffering,
+        # but reusing fetch_next_batch is simpler.
+        while True:
+            rows = fetch_next_batch(it)
+            if not rows:
+                break
+            result.extend(rows)
+            
+        return result
 
     # optional nextset() unsupported
 

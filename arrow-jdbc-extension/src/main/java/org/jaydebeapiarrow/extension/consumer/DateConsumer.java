@@ -15,18 +15,22 @@
  * limitations under the License.
  */
 
-package org.jaydebeapiarrow.extension;
+package org.jaydebeapiarrow.extension.consumer;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Calendar;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Logger;
 
 import org.apache.arrow.adapter.jdbc.consumer.BaseConsumer;
 import org.apache.arrow.adapter.jdbc.consumer.JdbcConsumer;
 import org.apache.arrow.vector.DateDayVector;
 import org.apache.arrow.vector.DateMilliVector;
+
+import org.jaydebeapiarrow.extension.ExplicitTypeMapper;
+import org.jaydebeapiarrow.extension.TimeUtils;
 
 public class DateConsumer {
 
@@ -50,6 +54,7 @@ public class DateConsumer {
     static class NullableDateConsumer extends BaseConsumer<DateDayVector> {
 
         protected final Calendar calendar;
+        private final AtomicBoolean useLegacy = new AtomicBoolean(false);
 
         /**
          * Instantiate a DateConsumer.
@@ -68,7 +73,7 @@ public class DateConsumer {
 
         @Override
         public void consume(ResultSet resultSet) throws SQLException {
-            long millis = TimeUtils.parseDateAsMilliSeconds(resultSet, columnIndexInResultSet);
+            long millis = TimeUtils.parseDateAsMilliSeconds(resultSet, columnIndexInResultSet, calendar, useLegacy);
             if (!resultSet.wasNull()) {
                 // for fixed width vectors, we have allocated enough memory proactively,
                 // so there is no need to call the setSafe method here.
@@ -84,6 +89,7 @@ public class DateConsumer {
     static class NonNullableDateConsumer extends BaseConsumer<DateDayVector> {
 
         protected final Calendar calendar;
+        private final AtomicBoolean useLegacy = new AtomicBoolean(false);
 
         /**
          * Instantiate a DateConsumer.
@@ -102,7 +108,7 @@ public class DateConsumer {
 
         @Override
         public void consume(ResultSet resultSet) throws SQLException {
-            long millis = TimeUtils.parseDateAsMilliSeconds(resultSet, columnIndexInResultSet);
+            long millis = TimeUtils.parseDateAsMilliSeconds(resultSet, columnIndexInResultSet, calendar, useLegacy);
             // for fixed width vectors, we have allocated enough memory proactively,
             // so there is no need to call the setSafe method here.
             vector.set(currentIndex, Math.toIntExact(TimeUnit.MILLISECONDS.toDays(millis)));
