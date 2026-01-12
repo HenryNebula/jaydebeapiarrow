@@ -104,7 +104,7 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
         global old_jpype
         if hasattr(jpype, '__version__'):
             try:
-                ver_match = re.match('\d+\.\d+', jpype.__version__)
+                ver_match = re.match(r'\d+\.\d+', jpype.__version__)
                 if ver_match:
                     jpype_ver = float(ver_match.group(0))
                     if jpype_ver < 0.7:
@@ -116,10 +116,15 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
         else:
             jpype.startJVM(jvm_path, *args, ignoreUnrecognized=True,
                            convertStrings=True)
-    if not jpype.isThreadAttachedToJVM():
+    
+    if not jpype.java.lang.Thread.isAttached():
         jpype.attachThreadToJVM()
         jpype.java.lang.Thread.currentThread().setContextClassLoader(jpype.java.lang.ClassLoader.getSystemClassLoader())
-
+    try:
+        import pyarrow.jvm
+    except ImportError as e:
+        raise RuntimeError(f"Failed to import pyarrow.jvm ({e}). Looks like JVM is not started. Thisis required for jaydebeapiarrow to work.")
+    
     # register driver for DriverManager
     jpype.JClass(jclassname)
     if isinstance(driver_args, dict):
@@ -185,22 +190,47 @@ class DBAPITypeObject(object):
             if type_name in DBAPITypeObject._mappings:
                 raise ValueError("Non unique mapping for type '%s'" % type_name)
             DBAPITypeObject._mappings[type_name] = self
-    def __cmp__(self, other):
-        if other in self.values:
-            return 0
-        if other < self.values:
-            return 1
-        else:
-            return -1
+    def __eq__(self, other):
+        if isinstance(other, DBAPITypeObject):
+            return self.group_name == other.group_name
+        if _jdbc_const_to_name is None:
+            return False
+        try:
+            name = _jdbc_const_to_name.get(other)
+        except (KeyError, TypeError):
+            return False
+        return name in self.values
+    def __ne__(self, other):
+        return not self.__eq__(other)
     def __repr__(self):
         return 'DBAPITypeObject(%s)' % ", ".join([repr(i) for i in self.values])
     @classmethod
     def _map_jdbc_type_to_dbapi(cls, jdbc_type_const):
+        global _jdbc_const_to_name
+        if _jdbc_const_to_name is None:
+            import jpype
+            if not jpype.isJVMStarted():
+                return None
+            try:
+                Types = jpype.java.sql.Types
+                _jdbc_const_to_name = {}
+                for field in Types.class_.getFields():
+                    modifiers = field.getModifiers()
+                    if jpype.java.lang.reflect.Modifier.isStatic(modifiers) and \
+                       jpype.java.lang.reflect.Modifier.isPublic(modifiers):
+                        try:
+                            value = int(field.get(None))
+                            _jdbc_const_to_name[value] = field.getName()
+                        except (TypeError, ValueError):
+                            continue
+            except Exception:
+                _jdbc_const_to_name = {}
+
         try:
             type_name = _jdbc_const_to_name[jdbc_type_const]
-        except KeyError:
-            warnings.warn("Unknown JDBC type with constant value %d. "
-                          "Using None as a default type_code." % jdbc_type_const)
+        except (KeyError, TypeError):
+            warnings.warn("Unknown JDBC type with constant value %s. "
+                          "Using None as a default type_code." % str(jdbc_type_const))
             return None
         try:
             return cls._mappings[type_name]
