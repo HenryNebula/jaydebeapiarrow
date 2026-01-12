@@ -19,6 +19,7 @@ package org.jaydebeapiarrow.extension.consumer;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.arrow.adapter.jdbc.consumer.JdbcConsumer;
 import org.apache.arrow.adapter.jdbc.consumer.BaseConsumer;
@@ -40,12 +41,14 @@ public abstract class TimeConsumer {
 
     static class NonNullableTimeConsumer extends BaseConsumer<TimeMilliVector> {
 
+        private final AtomicBoolean useLegacy = new AtomicBoolean(false);
+
         public NonNullableTimeConsumer(TimeMilliVector vector, int index) {
             super(vector, index);
         }
 
         public void consume(ResultSet resultSet) throws SQLException {
-            int millis = TimeUtils.parseTimeAsMilliSeconds(resultSet, columnIndexInResultSet);
+            int millis = TimeUtils.parseTimeAsMilliSeconds(resultSet, columnIndexInResultSet, null, useLegacy);
             vector.set(this.currentIndex, millis);
             ++this.currentIndex;
         }
@@ -53,12 +56,14 @@ public abstract class TimeConsumer {
 
     static class NullableTimeConsumer extends BaseConsumer<TimeMilliVector> {
 
+        private final AtomicBoolean useLegacy = new AtomicBoolean(false);
+
         public NullableTimeConsumer(TimeMilliVector vector, int index) {
             super(vector, index);
         }
 
         public void consume(ResultSet resultSet) throws SQLException {
-            int millis = TimeUtils.parseTimeAsMilliSeconds(resultSet, columnIndexInResultSet);
+            int millis = TimeUtils.parseTimeAsMilliSeconds(resultSet, columnIndexInResultSet, null, useLegacy);
             if (!resultSet.wasNull()) {
                 vector.set(this.currentIndex, millis);
             }

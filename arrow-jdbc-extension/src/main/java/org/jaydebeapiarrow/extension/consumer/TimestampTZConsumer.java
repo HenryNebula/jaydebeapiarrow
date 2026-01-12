@@ -26,6 +26,7 @@ import org.jaydebeapiarrow.extension.TimeUtils;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Calendar;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 
 /**
@@ -53,6 +54,7 @@ public abstract class TimestampTZConsumer {
      */
     static class NullableTimestampConsumer extends BaseConsumer<TimeStampMicroTZVector> {
         protected final Calendar calendar;
+        private final AtomicBoolean useLegacy = new AtomicBoolean(false);
 
         /**
          * Instantiate a TimestampConsumer.
@@ -65,7 +67,7 @@ public abstract class TimestampTZConsumer {
 
         @Override
         public void consume(ResultSet resultSet) throws SQLException {
-            long microTimeStamp = TimeUtils.parseTimestampAsMicroSeconds(resultSet, columnIndexInResultSet);
+            long microTimeStamp = TimeUtils.parseTimestampAsMicroSeconds(resultSet, columnIndexInResultSet, calendar, useLegacy);
             if (!resultSet.wasNull()) {
                 // for fixed width vectors, we have allocated enough memory proactively,
                 // so there is no need to call the setSafe method here.
@@ -81,6 +83,7 @@ public abstract class TimestampTZConsumer {
     static class NonNullableTimestampConsumer extends BaseConsumer<TimeStampMicroTZVector> {
 
         protected final Calendar calendar;
+        private final AtomicBoolean useLegacy = new AtomicBoolean(false);
 
         /**
          * Instantiate a TimestampConsumer.
@@ -94,7 +97,7 @@ public abstract class TimestampTZConsumer {
         public void consume(ResultSet resultSet) throws SQLException {
             // for fixed width vectors, we have allocated enough memory proactively,
             // so there is no need to call the setSafe method here.
-            long microTimeStamp = TimeUtils.parseTimestampAsMicroSeconds(resultSet, columnIndexInResultSet);
+            long microTimeStamp = TimeUtils.parseTimestampAsMicroSeconds(resultSet, columnIndexInResultSet, calendar, useLegacy);
             vector.set(currentIndex, microTimeStamp);
             currentIndex++;
         }

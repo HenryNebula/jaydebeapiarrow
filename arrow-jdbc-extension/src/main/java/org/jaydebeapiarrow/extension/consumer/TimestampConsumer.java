@@ -19,6 +19,7 @@ package org.jaydebeapiarrow.extension.consumer;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.arrow.vector.TimeStampMicroVector;
 import org.apache.arrow.adapter.jdbc.consumer.JdbcConsumer;
@@ -49,6 +50,8 @@ public abstract class TimestampConsumer {
      */
     static class NullableTimestampConsumer extends BaseConsumer<TimeStampMicroVector> {
 
+        private final AtomicBoolean useLegacy = new AtomicBoolean(false);
+
         /**
          * Instantiate a TimestampConsumer.
          */
@@ -58,7 +61,7 @@ public abstract class TimestampConsumer {
 
         @Override
         public void consume(ResultSet resultSet) throws SQLException {
-            long microTimeStamp = TimeUtils.parseTimestampAsMicroSeconds(resultSet, columnIndexInResultSet);
+            long microTimeStamp = TimeUtils.parseTimestampAsMicroSeconds(resultSet, columnIndexInResultSet, null, useLegacy);
             if (!resultSet.wasNull()) {
                 // for fixed width vectors, we have allocated enough memory proactively,
                 // so there is no need to call the setSafe method here.
@@ -73,6 +76,8 @@ public abstract class TimestampConsumer {
      */
     static class NonNullableTimestampConsumer extends BaseConsumer<TimeStampMicroVector> {
 
+        private final AtomicBoolean useLegacy = new AtomicBoolean(false);
+
         /**
          * Instantiate a TimestampConsumer.
          */
@@ -82,7 +87,7 @@ public abstract class TimestampConsumer {
 
         @Override
         public void consume(ResultSet resultSet) throws SQLException {
-            long microTimeStamp = TimeUtils.parseTimestampAsMicroSeconds(resultSet, columnIndexInResultSet);
+            long microTimeStamp = TimeUtils.parseTimestampAsMicroSeconds(resultSet, columnIndexInResultSet, null, useLegacy);
             vector.set(currentIndex, microTimeStamp);
             currentIndex++;
         }
