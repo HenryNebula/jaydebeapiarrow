@@ -36,7 +36,8 @@ from jaydebeapiarrow.lib.arrow_utils import \
     convert_jdbc_rs_to_arrow_iterator, \
     read_rows_from_arrow_iterator, \
     create_pyarrow_batches_from_list, \
-    add_pyarrow_batches_to_statement
+    add_pyarrow_batches_to_statement, \
+    fetch_next_batch
 
 
 def reraise(tp, value, tb=None):
@@ -375,15 +376,19 @@ class Connection(object):
 # DB-API 2.0 Cursor Object
 class Cursor(object):
 
-    rowcount = -1
-    _meta = None
-    _prep = None
     _rs = None
-    _rs_initial_fetch = True
     _description = None
+    _iter = None
+    _buffer = None
 
     def __init__(self, connection):
         self._connection = connection
+        self._buffer = []
+        self._prep = None
+
+    @property
+    def connection(self):
+        return self._connection
 
     @property
     def description(self):
@@ -422,9 +427,15 @@ class Cursor(object):
     def _close_last(self):
         """Close the resultset and reset collected meta data.
         """
+        if self._iter:
+            try:
+                self._iter.close()
+            except:
+                pass
+        self._iter = None
+        self._buffer = []
         if self._rs:
             self._rs.close()
-            self._rs_initial_fetch = True
         self._rs = None
         if self._prep:
             self._prep.close()
@@ -439,7 +450,7 @@ class Cursor(object):
 
     def _set_stmt_parms(self, statement, parameters):
         batches = create_pyarrow_batches_from_list(parameters)
-        add_pyarrow_batches_to_statement(batches, statement)
+        add_pyarrow_batches_to_statement(batches, statement, is_batch=is_batch)
 
     def execute(self, operation, parameters=None):
         if self._connection._closed:
@@ -448,14 +459,13 @@ class Cursor(object):
             parameters = ()
         self._close_last()
         self._prep = self._connection.jconn.prepareStatement(operation)
-        self._set_stmt_parms(self._prep, parameters)
+        self._set_stmt_parms(self._prep, parameters, is_batch=False)
         try:
             is_rs = self._prep.execute()
         except:
             _handle_sql_exception()
         if is_rs:
             self._rs = self._prep.getResultSet()
-            self._rs_initial_fetch = True
             self._meta = self._rs.getMetaData()
             self.rowcount = -1
         else:
@@ -465,63 +475,85 @@ class Cursor(object):
     def executemany(self, operation, seq_of_parameters):
         self._close_last()
         self._prep = self._connection.jconn.prepareStatement(operation)
-        self._set_stmt_parms(self._prep, seq_of_parameters)
+        self._set_stmt_parms(self._prep, seq_of_parameters, is_batch=True)
         update_counts = self._prep.executeBatch()
         # self._prep.getWarnings() ???
         self.rowcount = sum(update_counts)
         self._close_last()
 
+    def _get_iter(self):
+        if self._iter:
+            return self._iter
+        if not self._rs:
+            raise Error()
+        # Use a reasonable batch size. 
+        # For small reads (fetchone), this might be overhead, but it's safe.
+        # For large reads (fetchall), this is efficient.
+        # Using arraysize or a default.
+        batch_size = max(self.arraysize, 1024)
+        self._iter = convert_jdbc_rs_to_arrow_iterator(self._rs, batch_size=batch_size)
+        return self._iter
+
     def fetchone(self):
         if not self._rs:
             raise Error()
-        # if not self._rs.isBeforeFirst():
-        #     return None
-
-        if self._rs_initial_fetch:
-            self._rs_initial_fetch = False
-        else:
-            return None
-
-        it = convert_jdbc_rs_to_arrow_iterator(self._rs, batch_size=1)
-        row = read_rows_from_arrow_iterator(it, nrows=1)
-        return tuple(*row) if len(row) == 1 else None
+        
+        if self._buffer:
+            return self._buffer.pop(0)
+        
+        it = self._get_iter()
+        rows = fetch_next_batch(it)
+        if rows:
+            self._buffer.extend(rows)
+            return self._buffer.pop(0)
+        
+        return None
 
     def fetchmany(self, size=None):
         if not self._rs:
             raise Error()
-        # if not self._rs.isBeforeFirst():
-        #     return []
-
-        if self._rs_initial_fetch:
-            self._rs_initial_fetch = False
-        else:
-            return []
-
+        
         if size is None:
             size = self.arraysize
-
+        
         assert size > 0, f"Fetchmany expects positive size other than size={size}."
-
-        it = convert_jdbc_rs_to_arrow_iterator(self._rs, size)
-        rows = read_rows_from_arrow_iterator(it, size)
-
-        return rows
+        
+        result = []
+        while len(result) < size:
+            if self._buffer:
+                needed = size - len(result)
+                take = self._buffer[:needed]
+                self._buffer = self._buffer[needed:]
+                result.extend(take)
+            else:
+                it = self._get_iter()
+                rows = fetch_next_batch(it)
+                if not rows:
+                    break
+                self._buffer.extend(rows)
+        
+        return result
 
     def fetchall(self):
         if not self._rs:
             raise Error()
-        # if not self._rs.isBeforeFirst():
-        #     return []
-
-        if self._rs_initial_fetch:
-            self._rs_initial_fetch = False
-        else:
-            return []
         
-        it = convert_jdbc_rs_to_arrow_iterator(self._rs)
-        rows = read_rows_from_arrow_iterator(it)
-
-        return rows
+        result = []
+        if self._buffer:
+            result.extend(self._buffer)
+            self._buffer = []
+            
+        it = self._get_iter()
+        
+        # We can implement a more efficient fetchall if we want to avoid python loops for buffering,
+        # but reusing fetch_next_batch is simpler.
+        while True:
+            rows = fetch_next_batch(it)
+            if not rows:
+                break
+            result.extend(rows)
+            
+        return result
 
     # optional nextset() unsupported
 

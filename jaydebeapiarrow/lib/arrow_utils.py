@@ -13,6 +13,23 @@ def convert_jdbc_rs_to_arrow_iterator(rs, batch_size=1024):
     return JDBCUtils.convertResultSetToIterator(rs, batch_size)
 
 
+def fetch_next_batch(it):
+    """
+    Fetches the next batch from the ArrowVectorIterator 'it'.
+    Returns a list of rows (tuples).
+    Returns empty list if iterator is exhausted.
+    """
+    if it.hasNext():
+        root = it.next()
+        try:
+            batch = pa.jvm.record_batch(root).to_pylist()
+            rows = [tuple(r.values()) for r in batch]
+            return rows
+        finally:
+            root.clear()
+    return []
+
+
 def read_rows_from_arrow_iterator(it, nrows=-1):
     root = None
     rows = []
