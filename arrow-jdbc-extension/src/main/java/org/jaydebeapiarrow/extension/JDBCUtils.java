@@ -132,22 +132,21 @@ public class JDBCUtils {
     }
 
     public static ArrowVectorIterator convertResultSetToIterator(ResultSet resultSet, int batchSize) throws Exception {
-        try (BufferAllocator allocator = AllocatorSingleton.getChildAllocator()) {
-            OverriddenConsumer overriden_consumer = new OverriddenConsumer();
-            JdbcToArrowConfig arrow_jdbc_config = (
-                new JdbcToArrowConfigBuilder()
-                .setAllocator(allocator)
-                .setTargetBatchSize(batchSize)
-                .setBigDecimalRoundingMode(RoundingMode.UNNECESSARY)
-                .setExplicitTypesByColumnIndex(new ExplicitTypeMapper().createExplicitTypeMapping(resultSet))
-                .setIncludeMetadata(true)
-                .setJdbcToArrowTypeConverter((jdbcFieldInfo) -> overriden_consumer.getJdbcToArrowTypeConverter(jdbcFieldInfo))
-                .setJdbcConsumerGetter(OverriddenConsumer::getConsumer)
-                .build()
-            );
-            ArrowVectorIterator iterator = JdbcToArrow.sqlToArrowVectorIterator(resultSet, arrow_jdbc_config);
-            return iterator;
-        }
+        BufferAllocator allocator = AllocatorSingleton.getChildAllocator();
+        OverriddenConsumer overriden_consumer = new OverriddenConsumer();
+        JdbcToArrowConfig arrow_jdbc_config = (
+            new JdbcToArrowConfigBuilder()
+            .setAllocator(allocator)
+            .setTargetBatchSize(batchSize)
+            .setBigDecimalRoundingMode(RoundingMode.UNNECESSARY)
+            .setExplicitTypesByColumnIndex(new ExplicitTypeMapper().createExplicitTypeMapping(resultSet))
+            .setIncludeMetadata(true)
+            .setJdbcToArrowTypeConverter((jdbcFieldInfo) -> overriden_consumer.getJdbcToArrowTypeConverter(jdbcFieldInfo))
+            .setJdbcConsumerGetter(OverriddenConsumer::getConsumer)
+            .build()
+        );
+        ArrowVectorIterator iterator = JdbcToArrow.sqlToArrowVectorIterator(resultSet, arrow_jdbc_config);
+        return iterator;
     }
 
 }
