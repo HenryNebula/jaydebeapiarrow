@@ -8,6 +8,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public class TimeUtils {
@@ -18,14 +19,14 @@ public class TimeUtils {
         long millis = 0;
         try {
             LocalDate date = resultSet.getObject(columnIndexInResultSet, LocalDate.class);
-            if (! resultSet.wasNull()) {
+            if (! resultSet.wasNull() && date != null) {
                 millis = date.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli();
             }
         }
         catch (SQLException e) {
-            logger.warning(String.format("Can not consume date using getObject (possibly due to lack of support for java.time): %1s", e.getMessage()));
-            if (! resultSet.wasNull()) {
-                Date date = resultSet.getDate(columnIndexInResultSet, JdbcToArrowUtils.getUtcCalendar());
+            logger.log(Level.FINE, "Can not consume date using getObject (possibly due to lack of support for LocalDate)", e);
+            Date date = resultSet.getDate(columnIndexInResultSet, JdbcToArrowUtils.getUtcCalendar());
+            if (! resultSet.wasNull() && date != null) {
                 millis = date.getTime();
             }
         }
@@ -36,14 +37,14 @@ public class TimeUtils {
         int millis = 0;
         try {
             LocalTime time = resultSet.getObject(columnIndexInResultSet, LocalTime.class);
-            if (! resultSet.wasNull()) {
+            if (! resultSet.wasNull() && time != null) {
                 millis = time.toSecondOfDay() * 1000;
             }
         }
         catch (SQLException e) {
-            logger.warning(String.format("Can not consume time using getObject (possibly due to lack of support for java.time): %1s", e.getMessage()));
-            if (! resultSet.wasNull()) {
-                Time time = resultSet.getTime(columnIndexInResultSet, JdbcToArrowUtils.getUtcCalendar());
+            logger.log(Level.FINE, "Can not consume time using getObject (possibly due to lack of support for LocalTime)", e);
+            Time time = resultSet.getTime(columnIndexInResultSet, JdbcToArrowUtils.getUtcCalendar());
+            if (! resultSet.wasNull() && time != null) {
                 millis = (int) time.getTime(); /* since date components set to the "zero epoch" by driver */
             }
         }
@@ -52,11 +53,20 @@ public class TimeUtils {
 
     public static long parseTimestampAsMicroSeconds(ResultSet resultSet, int columnIndexInResultSet) throws SQLException {
         long micros = 0;
-        LocalDateTime timestamp = resultSet.getObject(columnIndexInResultSet, LocalDateTime.class);
-        if (! resultSet.wasNull()) {
-            int fractionalMicroSeconds = timestamp.getNano() / 1000;
-            long integralMicroSeconds = timestamp.toEpochSecond(ZoneOffset.UTC) * 1_000_000L;
-            micros = integralMicroSeconds + fractionalMicroSeconds;
+        try {
+            LocalDateTime timestamp = resultSet.getObject(columnIndexInResultSet, LocalDateTime.class);
+            if (! resultSet.wasNull() && timestamp != null) {
+                int fractionalMicroSeconds = timestamp.getNano() / 1000;
+                long integralMicroSeconds = timestamp.toEpochSecond(ZoneOffset.UTC) * 1_000_000L;
+                micros = integralMicroSeconds + fractionalMicroSeconds;
+            }
+        }
+        catch (SQLException e) {
+            logger.log(Level.FINE, "Can not consume timestamp using getObject (possibly due to lack of support for LocalDateTime)", e);
+            Timestamp timestamp = resultSet.getTimestamp(columnIndexInResultSet, JdbcToArrowUtils.getUtcCalendar());
+            if (! resultSet.wasNull() && timestamp != null) {
+                micros = timestamp.getTime() * 1000 + (timestamp.getNanos() / 1000) % 1000;
+            }
         }
         return micros;
     }
