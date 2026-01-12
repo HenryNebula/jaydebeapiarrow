@@ -12,6 +12,9 @@ jobs:
   test:
 
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
     strategy:
       matrix:
         python-version: [3.9, 3.11]
