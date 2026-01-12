@@ -381,10 +381,16 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
 
         import jpype
 
+        host = os.environ.get("JY_PG_HOST", "localhost")
+        port = os.environ.get("JY_PG_PORT", "5432")
+        db_name = os.environ.get("JY_PG_DB", "test_db")
+        user = os.environ.get("JY_PG_USER", "user")
+        password = os.environ.get("JY_PG_PASSWORD", "password")
+
         driver, url, driver_args = (
             'org.postgresql.Driver',
-            'jdbc:postgresql://localhost:5432/test_db',
-            {'user': 'user', 'password': 'password'}
+            f'jdbc:postgresql://{host}:{port}/{db_name}',
+            {'user': user, 'password': password}
         )
 
         try:
@@ -405,10 +411,16 @@ class MySQLTest(IntegrationTestBase, unittest.TestCase):
     def connect(self):
 
         import jpype
+        
+        host = os.environ.get("JY_MYSQL_HOST", "localhost")
+        port = os.environ.get("JY_MYSQL_PORT", "3306")
+        db_name = os.environ.get("JY_MYSQL_DB", "test_db")
+        user = os.environ.get("JY_MYSQL_USER", "root")
+        password = os.environ.get("JY_MYSQL_PASSWORD", "password")
 
         driver, url, driver_args = (
             'com.mysql.cj.jdbc.Driver',
-            'jdbc:mysql://localhost:3306/test_db?user=user&password=password',
+            f'jdbc:mysql://{host}:{port}/{db_name}?user={user}&password={password}',
             None
         )
 
