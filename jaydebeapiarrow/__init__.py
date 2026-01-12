@@ -58,8 +58,6 @@ _jdbc_const_to_name = None
 
 _jdbc_connect = None
 
-_java_array_byte = None
-
 _handle_sql_exception = None
 
 old_jpype = False
@@ -265,33 +263,27 @@ class NotSupportedError(DatabaseError):
     pass
 
 # DB-API 2.0 Type Objects and Constructors
-import jpype.dbapi2
 
-def _java_sql_blob(data):
-    return _java_array_byte(data)
+def Binary(x):
+    """Construct an object capable of holding a binary (long) string value."""
+    if isinstance(x, str):
+        return x.encode('utf-8')
+    return bytes(x)
 
-Binary = _java_sql_blob
+Date = datetime.date
+Time = datetime.time
+Timestamp = datetime.datetime
 
-def _str_func(func):
-    def to_str(*parms):
-        return str(func(*parms))
-    return to_str
+# Date = datetime.date
 
-def _ts_converter(*parms):
-    if len(parms) >= 7:
-        nano = parms[6] * 1000
-    else:
-        nano = 0
-    return jpype.dbapi2.Timestamp(*parms[:6], nano=nano)
+def DateFromTicks(ticks):
+    return Date(*time.localtime(ticks)[:3])
 
-TypedDate = lambda *parms: jpype.dbapi2.Date(*parms)
-Date = _str_func(datetime.date)
+def TimeFromTicks(ticks):
+    return Time(*time.localtime(ticks)[3:6])
 
-TypedTime = lambda *parms: jpype.dbapi2.Time(*parms)
-Time = _str_func(datetime.time)
-
-TypedTimestamp = lambda *parms: _ts_converter(*parms)
-Timestamp = _str_func(datetime.datetime)
+def TimestampFromTicks(ticks):
+    return Timestamp(*time.localtime(ticks)[:6])
 
 # DB-API 2.0 Module Interface connect constructor
 def connect(jclassname, url, driver_args=None, jars=None, libs=None):
@@ -326,7 +318,7 @@ def connect(jclassname, url, driver_args=None, jars=None, libs=None):
     else:
         libs = []
     jconn = _jdbc_connect(jclassname, url, driver_args, jars, libs)
-    return Connection(jconn)
+    return Connection(jconn, jclassname)
 
 # DB-API 2.0 Connection Object
 class Connection(object):
@@ -342,9 +334,13 @@ class Connection(object):
     DataError = DataError
     NotSupportedError = NotSupportedError
 
-    def __init__(self, jconn):
+    def __init__(self, jconn, jclassname=None):
         self.jconn = jconn
+        self._jclassname = jclassname
         self._closed = False
+        self._stringify_dates = False
+        if self._jclassname and ("sqlite" in self._jclassname.lower()):
+             self._stringify_dates = True
 
     def close(self):
         if self._closed:
@@ -448,7 +444,25 @@ class Cursor(object):
     #         # print (i, parameters[i], type(parameters[i]))
     #         prep_stmt.setObject(i + 1, parameters[i])
 
-    def _set_stmt_parms(self, statement, parameters):
+    def _stringify_params(self, params, is_batch):
+        if not params:
+            return params
+        
+        def _to_str(x):
+            if isinstance(x, (datetime.date, datetime.time, datetime.datetime)):
+                return str(x)
+            return x
+            
+        if is_batch:
+            # params is a sequence of sequences
+            return [[_to_str(p) for p in row] for row in params]
+        else:
+            # params is a sequence
+            return [_to_str(p) for p in params]
+
+    def _set_stmt_parms(self, statement, parameters, is_batch=False):
+        if self._connection._stringify_dates:
+             parameters = self._stringify_params(parameters, is_batch)
         batches = create_pyarrow_batches_from_list(parameters)
         add_pyarrow_batches_to_statement(batches, statement, is_batch=is_batch)
 
