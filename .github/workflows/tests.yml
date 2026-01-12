@@ -67,6 +67,11 @@ jobs:
         python -m pip install coveralls tox tox-gh-actions
     - name: Test with tox for non Jython only
       run: tox
+    - name: Publish Test Report
+      uses: mikepenz/action-junit-report@v4
+      if: always() # always run even if tests fail
+      with:
+        report_paths: '**/build/test-reports/*.xml'
 #    - name: Coveralls
 #      uses: baztian/coveralls-python-action@new-merged-changes
 #      with:
