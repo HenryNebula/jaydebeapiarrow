@@ -1,4 +1,4 @@
-create table Account (
+create table ACCOUNT (
 ACCOUNT_ID TIMESTAMP(6) default CURRENT_TIMESTAMP(6),
 ACCOUNT_NO INTEGER not null,
 BALANCE DECIMAL(10, 2)  not null default 0.0,

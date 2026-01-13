@@ -46,9 +46,8 @@
     </dependency>
     <dependency>
       <groupId>org.apache.arrow</groupId>
-      <artifactId>arrow-memory</artifactId>
+      <artifactId>arrow-memory-netty</artifactId>
       <version>15.0.0</version>
-      <type>pom</type>
     </dependency>
     <dependency>
       <groupId>org.apache.arrow</groupId>

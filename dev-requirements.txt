@@ -3,6 +3,6 @@ virtualenv==20.23.1
 wheel==0.34.2
 bump2version==1.0.0
 twine==1.15.0
-pyarrow==14.0.2
+pyarrow==15.0.0
 python-dotenv
 jpype1

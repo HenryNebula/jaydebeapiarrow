@@ -98,6 +98,10 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
             # path to shared libraries
             libs_path = os.path.pathsep.join(libs)
             args.append('-Djava.library.path=%s' % libs_path)
+        
+        # Add-opens for Apache Arrow on Java 9+
+        args.append('--add-opens=java.base/java.nio=ALL-UNNAMED')
+
         # jvm_path = ('/usr/lib/jvm/java-6-openjdk'
         #             '/jre/lib/i386/client/libjvm.so')
         jvm_path = jpype.getDefaultJVMPath()
