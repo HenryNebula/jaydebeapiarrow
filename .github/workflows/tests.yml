@@ -38,6 +38,8 @@ jobs:
         image: mysql:8.0
         env:
           MYSQL_DATABASE: test_db
+          MYSQL_USER: user
+          MYSQL_PASSWORD: password
           MYSQL_ROOT_PASSWORD: password
         ports:
           - 3306:3306
@@ -75,6 +77,8 @@ jobs:
       if: always() # always run even if tests fail
       with:
         report_paths: '**/build/test-reports/*.xml'
+        detailed_summary: true
+        include_passed: true
 #    - name: Coveralls
 #      uses: baztian/coveralls-python-action@new-merged-changes
 #      with:
