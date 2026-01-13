@@ -20,7 +20,8 @@ from setuptools import setup
 
 install_requires = [
     'JPype1>=1.0.0',
-    'pyarrow>=12.0.0',
+    'pyarrow>=15.0.0',
+    'numpy<2',
     'cffi',
 ]
 
