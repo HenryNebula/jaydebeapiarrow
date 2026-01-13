@@ -29,13 +29,14 @@ package_name = 'JayDeBeApiArrow'
 setup(
     # basic package data
     name=package_name,
-    version='0.0.3',
+    version='2.0.0',
     author='HenryNebula',
     author_email='henrynebula0710@gmail.com',
     license='GNU LGPL',
     url='https://github.com/HenryNebula/jaydebeapiarrow.git',
     description='Use JDBC database drivers from Python 3 with a DB-API, accelerated with Apache Arrow.',
     long_description=open('README.md').read(),
+    long_description_content_type='text/markdown',
     keywords = ('db api java jdbc bridge connect sql jpype apache-arrow'),
     classifiers = [
         'Development Status :: 3 - Alpha',
