@@ -415,7 +415,7 @@ class MySQLTest(IntegrationTestBase, unittest.TestCase):
         host = os.environ.get("JY_MYSQL_HOST", "localhost")
         port = os.environ.get("JY_MYSQL_PORT", "3306")
         db_name = os.environ.get("JY_MYSQL_DB", "test_db")
-        user = os.environ.get("JY_MYSQL_USER", "root")
+        user = os.environ.get("JY_MYSQL_USER", "user")
         password = os.environ.get("JY_MYSQL_PASSWORD", "password")
 
         driver, url, driver_args = (
