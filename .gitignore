@@ -27,3 +27,5 @@ jars/
 *.DS_Store
 */jars
 */lib/*.jar
+benchmark/results/
+benchmark/profiles/
