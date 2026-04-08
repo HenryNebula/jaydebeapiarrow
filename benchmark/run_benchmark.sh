@@ -18,6 +18,10 @@ pip install -r benchmark/requirements.txt
 echo "Downloading JDBC Driver..."
 bash benchmark/download_driver.sh
 
-# 5. Run Comparison
+# 5. Build arrow-jdbc-extension JAR
+echo "Building arrow-jdbc-extension..."
+bash arrow-jdbc-extension/build.sh
+
+# 6. Run Comparison
 echo "Running Benchmark..."
 python benchmark/compare_performance.py

@@ -5,7 +5,7 @@ import argparse
 
 # Configuration matching the benchmark script
 DB_HOST = "localhost"
-DB_PORT = "5432"
+DB_PORT = "5433"
 DB_NAME = "test_db"
 DB_USER = "user"
 DB_PASS = "password"

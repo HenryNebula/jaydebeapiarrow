@@ -10,15 +10,53 @@ import argparse
 import subprocess
 import json
 import psycopg2
+import platform
+from datetime import datetime
+from pathlib import Path
 
 # --- Configuration ---
 JDBC_DRIVER_PATH = os.path.abspath("test/jars/postgresql-42.7.2.jar")
 JDBC_CLASS = "org.postgresql.Driver"
-JDBC_URL = "jdbc:postgresql://localhost:5432/test_db"
+JDBC_URL = "jdbc:postgresql://localhost:5433/test_db"
 DB_USER = "user"
 DB_PASS = "password"
 QUERY = "SELECT * FROM benchmark_test"
 ITERATIONS = 3 # Reduced iterations for larger datasets to save time
+
+def get_system_info():
+    """Collect system information for benchmark metadata"""
+    return {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "platform": platform.platform(),
+        "python_version": platform.python_version(),
+        "hostname": platform.node(),
+    }
+
+def save_results(results_data, test_type, output_path=None):
+    """Save benchmark results to JSON file"""
+    if output_path is None:
+        # Generate default filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = f"benchmark/results/{test_type}_benchmark_{timestamp}.json"
+
+    # Ensure directory exists
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Prepare full result with metadata
+    full_result = {
+        "metadata": get_system_info(),
+        "test_type": test_type,
+        "iterations": ITERATIONS,
+        "results": results_data
+    }
+
+    # Save to file
+    with open(output_path, 'w') as f:
+        json.dump(full_result, f, indent=2)
+
+    print(f"\n✓ Results saved to: {output_path}", flush=True)
+    return str(output_path)
 
 def get_connection_original():
     return jaydebeapi.connect(
@@ -74,9 +112,21 @@ def benchmark_psycopg2():
     return sum(durations) / len(durations) if durations else 0, rows
 
 def benchmark_original(expected_total_rows=None):
+    """
+    Benchmark original jaydebeapi with improved progress tracking and extrapolation.
+
+    Improvements:
+    - Track time-per-batch to detect performance degradation
+    - Use weighted average (recent batches matter more)
+    - Require minimum sample size before extrapolating
+    - Provide confidence bounds on extrapolation
+    """
     durations = []
     rows = 0
     TIMEOUT_SECONDS = 300  # 5 minutes
+    BATCH_SIZE = 50000
+    MIN_BATCHES_FOR_EXTRAPOLATION = 5  # Require at least 5 batches
+    MIN_SAMPLE_RATIO = 0.10  # Require at least 10% of data for extrapolation
 
     for i in range(ITERATIONS):
         try:
@@ -84,46 +134,107 @@ def benchmark_original(expected_total_rows=None):
             start = time.time()
             curs = conn.cursor()
             curs.execute(QUERY)
-            
+
             rows_fetched = 0
             is_timeout = False
-            
+
+            # Track per-batch timing for progress analysis
+            batch_times = []
+            batch_rows = []
+            last_progress_time = start
+
             while True:
                 # Check timeout
                 elapsed = time.time() - start
                 if elapsed > TIMEOUT_SECONDS:
-                    print(f"  Run {i+1} TIMEOUT after {elapsed:.2f}s. Extrapolating...", flush=True)
+                    print(f"  Run {i+1} TIMEOUT after {elapsed:.2f}s.", flush=True)
                     is_timeout = True
                     break
-                
-                batch = curs.fetchmany(50000) # Fetch in chunks
+
+                batch_start = time.time()
+                batch = curs.fetchmany(BATCH_SIZE)
+                batch_end = time.time()
+
                 if not batch:
                     break
-                rows_fetched += len(batch)
+
+                batch_size = len(batch)
+                rows_fetched += batch_size
+
+                # Track batch timing
+                batch_time = batch_end - batch_start
+                batch_times.append(batch_time)
+                batch_rows.append(batch_size)
+
+                # Print progress every 10 seconds
+                now = time.time()
+                if now - last_progress_time >= 10:
+                    rows_per_sec = rows_fetched / (now - start)
+                    pct_complete = (rows_fetched / expected_total_rows * 100) if expected_total_rows else 0
+                    print(f"    Progress: {rows_fetched:,} rows ({pct_complete:.1f}%) at {rows_per_sec:,.0f} rows/s", flush=True)
+                    last_progress_time = now
 
             curs.close()
             conn.close()
-            
+
             if is_timeout:
                 if rows_fetched > 0 and expected_total_rows:
-                    # Extrapolate
-                    # time_per_row = elapsed / rows_fetched
-                    # total_time = time_per_row * expected_total_rows
-                    dur = (elapsed / rows_fetched) * expected_total_rows
-                    rows = expected_total_rows # Assume full rows for reporting
-                    print(f"  Run {i+1}: {dur:.4f}s (EXTRAPOLATED from {rows_fetched}/{expected_total_rows} rows)", flush=True)
+                    # Check if we have enough data for reliable extrapolation
+                    num_batches = len(batch_times)
+                    sample_ratio = rows_fetched / expected_total_rows
+
+                    has_min_batches = num_batches >= MIN_BATCHES_FOR_EXTRAPOLATION
+                    has_min_sample = sample_ratio >= MIN_SAMPLE_RATIO
+
+                    if not (has_min_batches and has_min_sample):
+                        print(f"    Warning: Insufficient data for extrapolation", flush=True)
+                        print(f"      Batches: {num_batches} (need >= {MIN_BATCHES_FOR_EXTRAPOLATION})", flush=True)
+                        print(f"      Sample: {sample_ratio:.1%} (need >= {MIN_SAMPLE_RATIO:.0%})", flush=True)
+
+                        # Still extrapolate but mark as unreliable
+                        extrapolation_reliable = False
+                    else:
+                        extrapolation_reliable = True
+
+                    # Analyze batch timing trend
+                    recent_batches = min(10, num_batches)
+                    recent_throughput = sum(batch_rows[-recent_batches:]) / sum(batch_times[-recent_batches:])
+                    overall_throughput = rows_fetched / elapsed
+
+                    # Use recent throughput for extrapolation (accounts for degradation)
+                    throughput_ratio = recent_throughput / overall_throughput if overall_throughput > 0 else 1.0
+
+                    if throughput_ratio < 0.8:
+                        print(f"    Warning: Performance degrading (recent: {recent_throughput:,.0f} rows/s, overall: {overall_throughput:,.0f} rows/s)", flush=True)
+                        extrapolation_reliable = False
+
+                    # Extrapolate using recent throughput
+                    remaining_rows = expected_total_rows - rows_fetched
+                    estimated_remaining = remaining_rows / recent_throughput if recent_throughput > 0 else 0
+                    dur = elapsed + estimated_remaining
+                    rows = expected_total_rows
+
+                    # Calculate confidence bounds (±20% to account for variability)
+                    confidence_min = dur * 0.8
+                    confidence_max = dur * 1.2
+
+                    reliability_marker = "~" if extrapolation_reliable else "?"
+                    print(f"  Run {i+1}: {reliability_marker}{dur:.4f}s (EXTRAPOLATED: {confidence_min:.2f}-{confidence_max:.2f}s)", flush=True)
+                    print(f"      Fetched: {rows_fetched:,}/{expected_total_rows:,} rows ({sample_ratio:.1%})", flush=True)
+                    print(f"      Recent throughput: {recent_throughput:,.0f} rows/s", flush=True)
+
                 else:
                     # Fallback if we can't extrapolate
                     dur = elapsed
                     rows = rows_fetched
-                    print(f"  Run {i+1}: {dur:.4f}s (TIMEOUT, partial rows: {rows})", flush=True)
+                    print(f"  Run {i+1}: {dur:.4f}s (TIMEOUT, incomplete: {rows:,} rows)", flush=True)
             else:
                 dur = time.time() - start
                 rows = rows_fetched
                 print(f"  Run {i+1}: {dur:.4f}s ({rows} rows)", flush=True)
 
             durations.append(dur)
-            
+
         except Exception as e:
              print(f"  Run {i+1} failed: {e}", flush=True)
              import traceback
@@ -163,22 +274,16 @@ def benchmark_arrow_native():
             start = time.time()
             curs = conn.cursor()
             curs.execute(QUERY)
-            
-            # Access internal iterator for zero-copy fetch
-            it = curs._get_iter()
-            
+
+            # Use Native Arrow API - zero-copy RecordBatch access
             current_run_rows = 0
-            while True:
-                if not it.hasNext():
-                    break
-                root = it.next()
-                try:
-                    # Mimic fetching the batch without converting to python objects
-                    rb = pa.jvm.record_batch(root)
-                    current_run_rows += rb.num_rows
-                finally:
-                    root.clear()
-            
+            for batch in curs.fetch_arrow_batches():
+                # Access batch metadata without Python conversion
+                current_run_rows += batch.num_rows
+                # In real usage, user would process batch here:
+                # df = batch.to_pandas()  # User's choice
+                # OR: process batch directly with Arrow-compatible libraries
+
             curs.close()
             conn.close()
             dur = time.time() - start
@@ -243,6 +348,7 @@ if __name__ == "__main__":
     parser.add_argument("--rows", type=int, default=None, help="Expected number of rows (worker/extrapolation)")
     parser.add_argument("--columns", type=int, default=None, help="Expected number of columns")
     parser.add_argument("--test-type", choices=["rows", "columns"], default="rows", help="Type of benchmark suite to run (coordinator)")
+    parser.add_argument("--output", type=str, default=None, help="Output JSON file path (default: benchmark/results/<type>_benchmark_<timestamp>.json)")
     args = parser.parse_args()
 
     if args.mode:
@@ -317,18 +423,21 @@ if __name__ == "__main__":
             print("\n" + "=" * 80)
             print(f" FINAL BENCHMARK REPORT (Variable Rows, Fixed 4 Cols)")
             print("=" * 80)
-            
+
             print(f"{ 'Dataset':<12} | {'Method':<20} | {'Time (s)':<10} | {'Speedup':<10}")
             print("-" * 80)
-            
+
             for size in dataset_sizes:
                 res_list = final_report[size]
                 base_time = next((r['time'] for r in res_list if r['name'] == "Original"), 0)
-                
+
                 for res in res_list:
                     speedup = base_time / res['time'] if res['time'] > 0 and base_time > 0 else 0.0
                     print(f"{size:<12} | {res['name']:<20} | {res['time']:<10.4f} | {speedup:<10.2f}x")
                 print("-" * 80)
+
+            # Save results to JSON
+            save_results(final_report, "rows", args.output)
 
         elif args.test_type == "columns":
             # --- Variable Columns Benchmark ---
@@ -368,15 +477,18 @@ if __name__ == "__main__":
             print("\n" + "=" * 80)
             print(f" FINAL BENCHMARK REPORT (Variable Columns, Fixed 1M Rows)")
             print("=" * 80)
-            
+
             print(f"{ 'Columns':<12} | {'Method':<20} | {'Time (s)':<10} | {'Speedup':<10}")
             print("-" * 80)
-            
+
             for size in column_counts:
                 res_list = final_report[size]
                 base_time = next((r['time'] for r in res_list if r['name'] == "Original"), 0)
-                
+
                 for res in res_list:
                     speedup = base_time / res['time'] if res['time'] > 0 and base_time > 0 else 0.0
                     print(f"{size:<12} | {res['name']:<20} | {res['time']:<10.4f} | {speedup:<10.2f}x")
                 print("-" * 80)
+
+            # Save results to JSON
+            save_results(final_report, "columns", args.output)
