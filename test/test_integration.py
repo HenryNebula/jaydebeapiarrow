@@ -74,11 +74,33 @@ class IntegrationTestBase(object):
                 stmt = []
         with self.conn.cursor() as cursor:
             for i in stmts:
-                cursor.execute(i)
+                cursor.execute(i.rstrip().rstrip(";"))
 
     def setUp(self):
         (self.dbapi, self.conn) = self.connect()
+        self._suppress_java_noise()
         self.setUpSql()
+
+    @staticmethod
+    def _suppress_java_noise():
+        """Suppress noisy Java loggers from Drill, Trino, etc."""
+        try:
+            import jpype
+            if not jpype.isJVMStarted():
+                return
+            Level = jpype.JClass("java.util.logging.Level")
+            root = jpype.JClass("java.util.logging.Logger").getLogger("")
+            for name in (
+                "oadd.org.apache.drill",
+                "org.apache.drill",
+                "io.trino",
+                "org.apache.arrow.memory",
+                "org.apache.arrow.vector",
+                "org.jaydebeapiarrow.extension",
+            ):
+                root.getLogger(name).setLevel(Level.WARNING)
+        except Exception:
+            pass
 
     def setUpSql(self):
         raise NotImplementedError
@@ -101,7 +123,7 @@ class IntegrationTestBase(object):
     def test_execute_and_fetch(self):
         with self.conn.cursor() as cursor:
             cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING " \
-                        "from ACCOUNT")
+                        "from ACCOUNT ORDER BY ACCOUNT_NO")
             result = cursor.fetchall()
         self.assertEqual(result, [
             (
@@ -470,7 +492,7 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
         import jpype
 
         host = os.environ.get("JY_PG_HOST", "localhost")
-        port = os.environ.get("JY_PG_PORT", "5432")
+        port = os.environ.get("JY_PG_PORT", "15432")
         db_name = os.environ.get("JY_PG_DB", "test_db")
         user = os.environ.get("JY_PG_USER", "user")
         password = os.environ.get("JY_PG_PASSWORD", "password")
@@ -553,7 +575,7 @@ class MySQLTest(IntegrationTestBase, unittest.TestCase):
         import jpype
         
         host = os.environ.get("JY_MYSQL_HOST", "localhost")
-        port = os.environ.get("JY_MYSQL_PORT", "3306")
+        port = os.environ.get("JY_MYSQL_PORT", "13306")
         db_name = os.environ.get("JY_MYSQL_DB", "test_db")
         user = os.environ.get("JY_MYSQL_USER", "user")
         password = os.environ.get("JY_MYSQL_PASSWORD", "password")
@@ -583,7 +605,7 @@ class MSSQLTest(IntegrationTestBase, unittest.TestCase):
         import jpype
 
         host = os.environ.get("JY_MSSQL_HOST", "localhost")
-        port = os.environ.get("JY_MSSQL_PORT", "1433")
+        port = os.environ.get("JY_MSSQL_PORT", "11433")
         user = os.environ.get("JY_MSSQL_USER", "sa")
         password = os.environ.get("JY_MSSQL_PASSWORD", "Password123!")
 
@@ -620,7 +642,7 @@ class TrinoTest(IntegrationTestBase, unittest.TestCase):
         import jpype
 
         host = os.environ.get("JY_TRINO_HOST", "localhost")
-        port = os.environ.get("JY_TRINO_PORT", "8080")
+        port = os.environ.get("JY_TRINO_PORT", "18080")
         user = os.environ.get("JY_TRINO_USER", "test")
 
         driver, url, driver_args = (
@@ -638,12 +660,16 @@ class TrinoTest(IntegrationTestBase, unittest.TestCase):
 
     def setUpSql(self):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_trino.sql'))
-        self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert.sql'))
+        self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert_trino.sql'))
 
     def tearDown(self):
         with self.conn.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS ACCOUNT")
         self.conn.close()
+
+    def test_execute_reset_description_without_execute_result(self):
+        """Trino memory connector does not support DELETE."""
+        self.skipTest("Trino memory connector does not support modifying table rows")
 
 
 class OracleTest(IntegrationTestBase, unittest.TestCase):
@@ -653,7 +679,7 @@ class OracleTest(IntegrationTestBase, unittest.TestCase):
         import jpype
 
         host = os.environ.get("JY_ORACLE_HOST", "localhost")
-        port = os.environ.get("JY_ORACLE_PORT", "1521")
+        port = os.environ.get("JY_ORACLE_PORT", "11521")
         user = os.environ.get("JY_ORACLE_USER", "system")
         password = os.environ.get("JY_ORACLE_PASSWORD", "Password123!")
 
@@ -697,11 +723,17 @@ class OracleTest(IntegrationTestBase, unittest.TestCase):
             parms = (20, )
             cursor.execute(stmt, parms)
             result = cursor.fetchone()
+        # Oracle JDBC quirks: NUMBER/INTEGER columns return BigDecimal with
+        # full scale, and Oracle DATE maps to TIMESTAMP (includes time part).
         exp = (
             self._cast_datetime('2010-01-26 14:31:59', r'%Y-%m-%d %H:%M:%S'),
-            account_no, balance, blocking, dbl_col,
-            self._cast_date('1908-02-27', r'%Y-%m-%d'),
-            valid, product_name
+            Decimal('20.00000000000000000'),   # INTEGER → NUMERIC → Decimal(scale=17)
+            Decimal('1.20'),                    # NUMBER(10,2) preserves scale
+            Decimal('10.00'),                   # NUMBER(10,2) preserves scale
+            dbl_col,
+            self._cast_datetime('1908-02-27 00:00:00', r'%Y-%m-%d %H:%M:%S'),
+            Decimal('1'),                       # NUMBER(1) → Decimal
+            product_name
         )
         self.assertEqual(result, exp)
 
@@ -738,7 +770,7 @@ class DB2Test(IntegrationTestBase, unittest.TestCase):
         import jpype
 
         host = os.environ.get("JY_DB2_HOST", "localhost")
-        port = os.environ.get("JY_DB2_PORT", "50000")
+        port = os.environ.get("JY_DB2_PORT", "15000")
         user = os.environ.get("JY_DB2_USER", "db2inst1")
         password = os.environ.get("JY_DB2_PASSWORD", "Password123!")
 

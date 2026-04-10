@@ -30,10 +30,10 @@ pip install JayDeBeApiArrow
 Or you can get a copy of the source by cloning from the [JayDeBeApiArrow github project](https://github.com/HenryNebula/jaydebeapiArrow) and install with:
 
 ```bash
-python setup.py install
+uv sync
 ```
 
-Ensure that you have installed [JPype](https://pypi.python.org/pypi/JPype1/) properly.
+Ensure that you have installed [JPype](https://pypi.python.org/pypi/JPype1/) properly (it will be installed automatically by `uv sync`).
 
 ## Usage
 
@@ -125,15 +125,16 @@ Integration tests are located in `test/`. The test suite covers SQLite (in-memor
 ### Build JARs and download drivers
 
 ```bash
-bash test/build.sh                 # Build arrow-jdbc-extension and MockDriver JARs
-bash test/download_jdbc_drivers.sh # Download PostgreSQL, MySQL, SQLite, HSQLDB JDBC drivers
+uv run bash test/build.sh                 # Build arrow-jdbc-extension and MockDriver JARs
+uv run bash test/download_jdbc_drivers.sh # Download PostgreSQL, MySQL, SQLite, HSQLDB JDBC drivers
 ```
 
 ### Run tests
 
 ```bash
-source .venv/bin/activate
-CLASSPATH="test/jars/*" python -m unittest discover -s test -v
+CLASSPATH="test/jars/*" uv run python -m unittest test.test_integration.HsqldbTest   # HSQLDB
+CLASSPATH="test/jars/*" uv run python -m unittest test.test_integration.SqliteXerialTest  # SQLite
+CLASSPATH="test/jars/*" uv run python -m unittest test.test_mock                       # Mock driver
 ```
 
 ### External database tests

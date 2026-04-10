@@ -50,7 +50,7 @@ public class OverriddenConsumer {
                 int precision = fieldInfo.getPrecision();
                 int scale = fieldInfo.getScale();
                 if (precision <= 0) precision = 38;
-                if (scale <= 0) scale = 17;
+                if (scale <= 0 && precision > 1) scale = Math.min(17, precision);
                 return new ArrowType.Decimal(precision, scale, 128);
             default:
                 return JdbcToArrowUtils.getArrowTypeFromJdbcType(fieldInfo, null);

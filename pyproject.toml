@@ -40,6 +40,12 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/HenryNebula/jaydebeapiarrow"
 
+[dependency-groups]
+dev = [
+    "coverage>=4.5",
+    "unittest-xml-reporting",
+]
+
 [tool.setuptools]
 packages = ["jaydebeapiarrow", "jaydebeapiarrow.lib"]
 include-package-data = true

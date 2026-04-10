@@ -38,7 +38,12 @@ public class ExplicitTypeMapper {
             int columnType = metaData.getColumnType(columnIndex);
             String columnName = metaData.getColumnName(columnIndex);
             String columnTypeName = metaData.getColumnTypeName(columnIndex);
-            String inferredColumnTypeName = JDBCType.valueOf(columnType).getName();
+            String inferredColumnTypeName;
+            try {
+                inferredColumnTypeName = JDBCType.valueOf(columnType).getName();
+            } catch (IllegalArgumentException e) {
+                inferredColumnTypeName = columnTypeName;
+            }
             int columnNullable = metaData.isNullable(columnIndex);
 
             String[] columnMetaData = {
@@ -94,6 +99,40 @@ public class ExplicitTypeMapper {
             if (resultSet.getMetaData().getColumnName(columnIndex).contains("DECIMAL")) {
                 logger.fine(String.format("Inferred column %1s (%2s) as a Decimal", columnIndex, resultSet.getMetaData().getColumnName(columnIndex)));
                 decimalColumnIndices.add(columnIndex);
+            }
+        }
+
+        /* Detect columns whose JDBC type code is not recognized by the standard
+         * JDBCType enum. Use column type NAME matching instead of hardcoded type
+         * codes so this works driver-agnostically.
+         * Known cases: Oracle reports BINARY_DOUBLE as type 101, and
+         * TIMESTAMP WITH TIME ZONE as type 101 (ojdbc8) or 2013 (ojdbc11). */
+        for (int columnIndex = 1; columnIndex <= resultSet.getMetaData().getColumnCount(); columnIndex++) {
+            int columnType = resultSet.getMetaData().getColumnType(columnIndex);
+            String columnTypeName = resultSet.getMetaData().getColumnTypeName(columnIndex);
+            try {
+                JDBCType.valueOf(columnType);
+            } catch (IllegalArgumentException e) {
+                String upperTypeName = columnTypeName.toUpperCase();
+                if (upperTypeName.contains("BINARY_DOUBLE")) {
+                    explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.DOUBLE));
+                    logger.fine(String.format(
+                            "Detected column %1s (%2s) as DOUBLE from type name '%3s' (JDBC type %4$s)",
+                            columnIndex, resultSet.getMetaData().getColumnName(columnIndex),
+                            columnTypeName, columnType));
+                } else if (upperTypeName.contains("TIMESTAMP") && upperTypeName.contains("TIME ZONE")) {
+                    explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.TIMESTAMP_WITH_TIMEZONE));
+                    logger.fine(String.format(
+                            "Detected column %1s (%2s) as TIMESTAMP_WITH_TIMEZONE from type name '%3s' (JDBC type %4$s)",
+                            columnIndex, resultSet.getMetaData().getColumnName(columnIndex),
+                            columnTypeName, columnType));
+                } else if (upperTypeName.contains("TIMESTAMP")) {
+                    explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.TIMESTAMP));
+                    logger.fine(String.format(
+                            "Detected column %1s (%2s) as TIMESTAMP from type name '%3s' (JDBC type %4$s)",
+                            columnIndex, resultSet.getMetaData().getColumnName(columnIndex),
+                            columnTypeName, columnType));
+                }
             }
         }
 

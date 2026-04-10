@@ -1,156 +1,141 @@
 #!/bin/bash
-# Start database containers for benchmarking
+# Start database containers for testing
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Load .env if it exists
+if [ -f .env ]; then
+    set -a; source .env; set +a
+fi
+
+# Apply defaults for any values not in .env
+: "${POSTGRES_PORT:=15432}" "${POSTGRES_DB:=test_db}" "${POSTGRES_USER:=user}" "${POSTGRES_PASSWORD:=password}"
+: "${MYSQL_PORT:=13306}" "${MYSQL_DATABASE:=test_db}" "${MYSQL_USER:=user}" "${MYSQL_PASSWORD:=password}"
+: "${ORACLE_PORT:=11521}" "${ORACLE_PASSWORD:=Password123!}"
+: "${MSSQL_PORT:=11433}" "${MSSQL_SA_PASSWORD:=Password123!}"
+: "${DB2_PORT:=15000}" "${DB2_PASSWORD:=Password123!}" "${DB2_DBNAME:=test_db}"
+: "${DRILL_PORT:=31010}" "${DRILL_WEB_PORT:=18047}"
+: "${TRINO_PORT:=18080}"
+
 echo "Starting database containers..."
 
-# Start specific database or all
 DB=${1:-all}
+
+wait_for_healthy() {
+    local container="$1"
+    local max_wait="${2:-300}"
+    local elapsed=0
+    while [ $elapsed -lt $max_wait ]; do
+        status=$(docker inspect --format '{{.State.Health.Status}}' "$container" 2>/dev/null || echo "missing")
+        if [ "$status" = "healthy" ]; then
+            return 0
+        fi
+        sleep 5
+        elapsed=$((elapsed + 5))
+    done
+    echo "  WARNING: $container not healthy after ${max_wait}s (status: $status)"
+    return 1
+}
 
 case $DB in
   postgres|pg)
     echo "Starting PostgreSQL..."
-    docker-compose up -d postgres
-    echo "Waiting for PostgreSQL to be ready..."
-    docker-compose exec -T postgres pg_isready -U user -d test_db
-    echo "PostgreSQL is ready at localhost:5432"
-    echo "  Database: test_db"
-    echo "  User: user"
-    echo "  Password: password"
+    docker compose up -d postgres
+    wait_for_healthy jaydebeapi-benchmark-postgres 30
+    echo "PostgreSQL is ready at localhost:${POSTGRES_PORT}"
+    echo "  Database: ${POSTGRES_DB}"
+    echo "  User: ${POSTGRES_USER}"
+    echo "  Password: ${POSTGRES_PASSWORD}"
     ;;
   mysql)
     echo "Starting MySQL..."
-    docker-compose up -d mysql
-    echo "Waiting for MySQL to be ready..."
-    until docker-compose exec -T mysql mysqladmin ping -h localhost -u user -ppassword --silent; do
-      echo "  Waiting for MySQL..."
-      sleep 2
-    done
-    echo "MySQL is ready at localhost:3306"
-    echo "  Database: test_db"
-    echo "  User: user"
-    echo "  Password: password"
+    docker compose up -d mysql
+    wait_for_healthy jaydebeapi-benchmark-mysql 30
+    echo "MySQL is ready at localhost:${MYSQL_PORT}"
+    echo "  Database: ${MYSQL_DATABASE}"
+    echo "  User: ${MYSQL_USER}"
+    echo "  Password: ${MYSQL_PASSWORD}"
     ;;
   oracle)
     echo "Starting Oracle XE..."
-    docker-compose up -d oracle
+    docker compose up -d oracle
     echo "Waiting for Oracle XE to be ready (this may take 2-3 minutes)..."
-    until docker-compose exec -T oracle bash -c "echo 'SELECT 1 FROM DUAL;' | sqlplus -S system/Password123!@localhost/XEPDB1" 2>/dev/null | grep -q "^         1"; do
-      echo "  Waiting for Oracle..."
-      sleep 10
-    done
-    echo "Oracle XE is ready at localhost:1521"
+    wait_for_healthy jaydebeapi-test-oracle 300
+    echo "Oracle XE is ready at localhost:${ORACLE_PORT}"
     echo "  Service: XEPDB1"
     echo "  User: system"
-    echo "  Password: Password123!"
+    echo "  Password: ${ORACLE_PASSWORD}"
     ;;
   mssql)
     echo "Starting MS SQL Server..."
-    docker-compose up -d mssql
-    echo "Waiting for MS SQL Server to be ready..."
-    until docker-compose exec -T mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Password123!' -C -Q 'SELECT 1' >/dev/null 2>&1; do
-      echo "  Waiting for MS SQL Server..."
-      sleep 3
-    done
-    echo "MS SQL Server is ready at localhost:1433"
+    docker compose up -d mssql
+    wait_for_healthy jaydebeapi-test-mssql 60
+    echo "MS SQL Server is ready at localhost:${MSSQL_PORT}"
     echo "  User: sa"
-    echo "  Password: Password123!"
+    echo "  Password: ${MSSQL_SA_PASSWORD}"
     ;;
   db2)
     echo "Starting IBM DB2..."
-    docker-compose up -d db2
+    docker compose up -d db2
     echo "Waiting for DB2 to be ready (this may take 5+ minutes)..."
-    until docker-compose exec -T db2 su - db2inst1 -c "db2 connect to test_db" >/dev/null 2>&1; do
-      echo "  Waiting for DB2..."
-      sleep 10
-    done
-    echo "DB2 is ready at localhost:50000"
-    echo "  Database: test_db"
+    wait_for_healthy jaydebeapi-test-db2 600
+    echo "DB2 is ready at localhost:${DB2_PORT}"
+    echo "  Database: ${DB2_DBNAME}"
     echo "  User: db2inst1"
-    echo "  Password: Password123!"
+    echo "  Password: ${DB2_PASSWORD}"
     ;;
   drill)
     echo "Starting Apache Drill..."
-    docker-compose up -d drill
-    echo "Waiting for Drill to be ready..."
-    until curl -sf http://localhost:8047/stats.json >/dev/null 2>&1; do
-      echo "  Waiting for Drill..."
-      sleep 5
-    done
-    echo "Drill is ready at localhost:31010 (JDBC), localhost:8047 (Web UI)"
+    docker compose up -d drill
+    wait_for_healthy jaydebeapi-test-drill 120
+    echo "Drill is ready at localhost:${DRILL_PORT} (JDBC), localhost:${DRILL_WEB_PORT} (Web UI)"
     ;;
   trino)
     echo "Starting Trino..."
-    docker-compose up -d trino
-    echo "Waiting for Trino to be ready..."
-    until curl -sf http://localhost:8080/v1/info >/dev/null 2>&1; do
-      echo "  Waiting for Trino..."
-      sleep 3
-    done
+    docker compose up -d trino
+    wait_for_healthy jaydebeapi-test-trino 60
     echo "Creating memory catalog..."
-    docker-compose exec -T trino trino --execute 'CREATE CATALOG memory USING memory;' 2>/dev/null || echo "  Catalog may already exist"
-    echo "Trino is ready at localhost:8080"
+    docker compose exec -T trino trino --execute 'CREATE CATALOG memory USING memory;' 2>/dev/null || echo "  Catalog may already exist"
+    echo "Trino is ready at localhost:${TRINO_PORT}"
     echo "  Catalog: memory"
     echo "  Schema: default"
     ;;
   all)
     echo "Starting all databases..."
-    docker-compose up -d
+    docker compose up -d
 
     echo "Waiting for PostgreSQL..."
-    until docker-compose exec -T postgres pg_isready -U user -d test_db 2>/dev/null; do
-      echo "  Waiting for PostgreSQL..."
-      sleep 2
-    done
-    echo "PostgreSQL is ready at localhost:5432"
+    wait_for_healthy jaydebeapi-benchmark-postgres 30
+    echo "  PostgreSQL ready at localhost:${POSTGRES_PORT}"
 
     echo "Waiting for MySQL..."
-    until docker-compose exec -T mysql mysqladmin ping -h localhost -u user -ppassword --silent 2>/dev/null; do
-      echo "  Waiting for MySQL..."
-      sleep 2
-    done
-    echo "MySQL is ready at localhost:3306"
+    wait_for_healthy jaydebeapi-benchmark-mysql 30
+    echo "  MySQL ready at localhost:${MYSQL_PORT}"
 
     echo "Waiting for Oracle XE..."
-    until docker-compose exec -T oracle bash -c "echo 'SELECT 1 FROM DUAL;' | sqlplus -S system/Password123!@localhost/XEPDB1" 2>/dev/null | grep -q "^         1"; do
-      echo "  Waiting for Oracle..."
-      sleep 10
-    done
-    echo "Oracle XE is ready at localhost:1521"
+    wait_for_healthy jaydebeapi-test-oracle 300
+    echo "  Oracle ready at localhost:${ORACLE_PORT}"
 
     echo "Waiting for MS SQL Server..."
-    until docker-compose exec -T mssql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Password123!' -C -Q 'SELECT 1' >/dev/null 2>&1; do
-      echo "  Waiting for MS SQL Server..."
-      sleep 3
-    done
-    echo "MS SQL Server is ready at localhost:1433"
+    wait_for_healthy jaydebeapi-test-mssql 60
+    echo "  MSSQL ready at localhost:${MSSQL_PORT}"
 
     echo "Waiting for DB2..."
-    until docker-compose exec -T db2 su - db2inst1 -c "db2 connect to test_db" >/dev/null 2>&1; do
-      echo "  Waiting for DB2..."
-      sleep 10
-    done
-    echo "DB2 is ready at localhost:50000"
+    wait_for_healthy jaydebeapi-test-db2 600
+    echo "  DB2 ready at localhost:${DB2_PORT}"
 
     echo "Waiting for Drill..."
-    until curl -sf http://localhost:8047/stats.json >/dev/null 2>&1; do
-      echo "  Waiting for Drill..."
-      sleep 5
-    done
-    echo "Drill is ready at localhost:31010"
+    wait_for_healthy jaydebeapi-test-drill 120
+    echo "  Drill ready at localhost:${DRILL_PORT}"
 
     echo "Waiting for Trino..."
-    until curl -sf http://localhost:8080/v1/info >/dev/null 2>&1; do
-      echo "  Waiting for Trino..."
-      sleep 3
-    done
+    wait_for_healthy jaydebeapi-test-trino 60
     echo "Creating Trino memory catalog..."
-    docker-compose exec -T trino trino --execute 'CREATE CATALOG memory USING memory;' 2>/dev/null || echo "  Catalog may already exist"
-    echo "Trino is ready at localhost:8080"
+    docker compose exec -T trino trino --execute 'CREATE CATALOG memory USING memory;' 2>/dev/null || echo "  Catalog may already exist"
+    echo "  Trino ready at localhost:${TRINO_PORT}"
 
     echo ""
     echo "All databases are ready!"

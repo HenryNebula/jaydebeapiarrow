@@ -1,17 +1,15 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
     container_name: jaydebeapi-benchmark-postgres
     environment:
-      POSTGRES_DB: test_db
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "5433:5432"
+      - "${POSTGRES_PORT}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d test_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -22,14 +20,14 @@ services:
     image: mysql:8.0
     container_name: jaydebeapi-benchmark-mysql
     environment:
-      MYSQL_DATABASE: test_db
-      MYSQL_USER: user
-      MYSQL_PASSWORD: password
-      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
     ports:
-      - "3306:3306"
+      - "${MYSQL_PORT}:3306"
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "user", "-ppassword"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "${MYSQL_USER}", "-p${MYSQL_PASSWORD}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -40,11 +38,11 @@ services:
     image: gvenzl/oracle-xe:21-slim
     container_name: jaydebeapi-test-oracle
     environment:
-      ORACLE_PASSWORD: Password123!
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD}
     ports:
-      - "1521:1521"
+      - "${ORACLE_PORT}:1521"
     healthcheck:
-      test: ["CMD-SHELL", "echo 'SELECT 1 FROM DUAL;' | sqlplus -S system/Password123!@localhost/XEPDB1"]
+      test: ["CMD-SHELL", "echo 'SELECT 1 FROM DUAL;' | sqlplus -S system/${ORACLE_PASSWORD}@localhost/XEPDB1"]
       interval: 15s
       timeout: 10s
       retries: 30
@@ -57,11 +55,11 @@ services:
     container_name: jaydebeapi-test-mssql
     environment:
       ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: "Password123!"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD}"
     ports:
-      - "1433:1433"
+      - "${MSSQL_PORT}:1433"
     healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Password123!' -C -Q 'SELECT 1'"]
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '${MSSQL_SA_PASSWORD}' -C -Q 'SELECT 1'"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -73,12 +71,12 @@ services:
     privileged: true
     environment:
       LICENSE: accept
-      DB2INST1_PASSWORD: "Password123!"
-      DBNAME: test_db
+      DB2INST1_PASSWORD: "${DB2_PASSWORD}"
+      DBNAME: ${DB2_DBNAME}
     ports:
-      - "50000:50000"
+      - "${DB2_PORT}:50000"
     healthcheck:
-      test: ["CMD-SHELL", "su - db2inst1 -c 'db2 connect to test_db'"]
+      test: ["CMD-SHELL", "su - db2inst1 -c 'db2 connect to ${DB2_DBNAME}'"]
       interval: 15s
       timeout: 10s
       retries: 30
@@ -89,11 +87,13 @@ services:
   drill:
     image: apache/drill:1.21.0
     container_name: jaydebeapi-test-drill
+    tty: true
+    stdin_open: true
     ports:
-      - "31010:31010"
-      - "8047:8047"
+      - "${DRILL_PORT}:31010"
+      - "${DRILL_WEB_PORT}:8047"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8047/stats.json || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:8047/ || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 15
@@ -103,7 +103,7 @@ services:
     image: trinodb/trino:461
     container_name: jaydebeapi-test-trino
     ports:
-      - "8080:8080"
+      - "${TRINO_PORT}:8080"
     environment:
       CATALOG_MANAGEMENT: dynamic
     healthcheck:

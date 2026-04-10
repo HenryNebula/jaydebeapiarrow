@@ -4,6 +4,7 @@
 build/
 dist/
 env/
+.venv/
 .ropeproject/globalnames
 .ropeproject/history
 .ropeproject/objectdb
