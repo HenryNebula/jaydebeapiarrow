@@ -111,15 +111,11 @@ jobs:
 #      with:
 #        parallel-finished: true
 
-  test-new-dbs:
+  test-oracle:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       checks: write
-    strategy:
-      matrix:
-        python-version: [3.14]
-        db: [oracle, mssql, trino]
 
     services:
       oracle:
@@ -134,38 +130,13 @@ jobs:
           --health-timeout 10s
           --health-retries 30
           --health-start-period 120s
-      mssql:
-        image: mcr.microsoft.com/mssql/server:2022-latest
-        env:
-          ACCEPT_EULA: "Y"
-          MSSQL_SA_PASSWORD: "Password123!"
-        ports:
-          - 1433:1433
-        options: >-
-          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Password123!' -C -Q 'SELECT 1'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-          --health-start-period 30s
-      trino:
-        image: trinodb/trino:461
-        ports:
-          - 8080:8080
-        options: >-
-          --health-cmd "curl -sf http://localhost:8080/v1/info"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-          --health-start-period 30s
-        volumes:
-          - ${{ github.workspace }}/test/data/trino/etc/catalog/memory.properties:/etc/trino/catalog/memory.properties:ro
 
     steps:
     - uses: actions/checkout@v4
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: '3.14'
     - name: Set up JDK
       uses: actions/setup-java@v4
       with:
@@ -186,25 +157,144 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ~/.cache/pip
-        key: ${{ runner.os }}-py${{ matrix.python-version }}-pip-${{ hashFiles('**/*requirements.txt', 'tox.ini', 'setup.py') }}
+        key: ${{ runner.os }}-py3.14-pip-${{ hashFiles('**/*requirements.txt', 'tox.ini', 'setup.py') }}
         restore-keys: |
-          ${{ runner.os }}-py${{ matrix.python-version }}-pip-
-
+          ${{ runner.os }}-py3.14-pip-
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         python -m pip install tox tox-gh-actions
     - name: Test with tox
-      run: tox -e py314-driver-${{ matrix.db }}
+      run: tox -e py314-driver-oracle
       env:
         JY_ORACLE_HOST: localhost
         JY_ORACLE_PORT: "1521"
         JY_ORACLE_USER: system
         JY_ORACLE_PASSWORD: Password123!
+
+  test-mssql:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: "Password123!"
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Password123!' -C -Q 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 30s
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.14'
+    - name: Set up JDK
+      uses: actions/setup-java@v4
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+    - name: JARs cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          jaydebeapiarrow/lib/
+          test/jars/
+          arrow-jdbc-extension/target/
+          mockdriver/target/
+        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-jars-
+    - name: Pip cache
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-py3.14-pip-${{ hashFiles('**/*requirements.txt', 'tox.ini', 'setup.py') }}
+        restore-keys: |
+          ${{ runner.os }}-py3.14-pip-
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install tox tox-gh-actions
+    - name: Test with tox
+      run: tox -e py314-driver-mssql
+      env:
         JY_MSSQL_HOST: localhost
         JY_MSSQL_PORT: "1433"
         JY_MSSQL_USER: sa
         JY_MSSQL_PASSWORD: "Password123!"
+
+  test-trino:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+
+    services:
+      trino:
+        image: trinodb/trino:461
+        ports:
+          - 8080:8080
+        options: >-
+          --name trino
+          --health-cmd "curl -sf http://localhost:8080/v1/info"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 30s
+        volumes:
+          - ${{ github.workspace }}/test/data/trino/etc/catalog/memory.properties:/etc/trino/catalog/memory.properties:ro
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Restart Trino after checkout
+      uses: docker://docker
+      with:
+        args: docker restart trino
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.14'
+    - name: Set up JDK
+      uses: actions/setup-java@v4
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+    - name: JARs cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          jaydebeapiarrow/lib/
+          test/jars/
+          arrow-jdbc-extension/target/
+          mockdriver/target/
+        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-jars-
+    - name: Pip cache
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-py3.14-pip-${{ hashFiles('**/*requirements.txt', 'tox.ini', 'setup.py') }}
+        restore-keys: |
+          ${{ runner.os }}-py3.14-pip-
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install tox tox-gh-actions
+    - name: Test with tox
+      run: tox -e py314-driver-trino
+      env:
         JY_TRINO_HOST: localhost
         JY_TRINO_PORT: "8080"
         JY_TRINO_USER: test
