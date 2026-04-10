@@ -20,8 +20,8 @@ from setuptools import setup
 
 install_requires = [
     'JPype1>=1.0.0',
-    'pyarrow>=15.0.0',
-    'numpy<2',
+    'pyarrow>=16.0.0',
+    'numpy',
     'cffi',
 ]
 
@@ -53,5 +53,5 @@ setup(
     packages=[ package_name.lower(), package_name.lower() + ".lib"],
     install_requires=install_requires,
     include_package_data=True,
-    python_requires='>=3.8',
+    python_requires='>=3.9',
 )
