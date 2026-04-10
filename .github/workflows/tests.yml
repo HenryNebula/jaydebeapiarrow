@@ -17,7 +17,7 @@ jobs:
       checks: write
     strategy:
       matrix:
-        python-version: [3.9, 3.11]
+        python-version: [3.9, 3.14]
         plattform: ["Python"]
 
     services:
@@ -102,7 +102,7 @@ jobs:
       checks: write
     strategy:
       matrix:
-        python-version: [3.11]
+        python-version: [3.14]
         db: [oracle, mssql, trino]
 
     services:
@@ -163,7 +163,7 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install tox tox-gh-actions
     - name: Test with tox
-      run: tox -e py311-driver-${{ matrix.db }}
+      run: tox -e py314-driver-${{ matrix.db }}
       env:
         JY_ORACLE_HOST: localhost
         JY_ORACLE_PORT: "1521"
@@ -184,7 +184,7 @@ jobs:
       checks: write
     strategy:
       matrix:
-        python-version: [3.11]
+        python-version: [3.14]
 
     steps:
     - uses: actions/checkout@v4
@@ -222,7 +222,7 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install tox tox-gh-actions
     - name: Test with tox
-      run: tox -e py311-driver-db2
+      run: tox -e py314-driver-db2
       env:
         JY_DB2_HOST: localhost
         JY_DB2_PORT: "50000"
@@ -236,7 +236,7 @@ jobs:
       checks: write
     strategy:
       matrix:
-        python-version: [3.11]
+        python-version: [3.14]
 
     steps:
     - uses: actions/checkout@v4
@@ -272,7 +272,7 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install tox tox-gh-actions
     - name: Test with tox
-      run: tox -e py311-driver-drill
+      run: tox -e py314-driver-drill
       env:
         JY_DRILL_HOST: localhost
         JY_DRILL_PORT: "31010"
