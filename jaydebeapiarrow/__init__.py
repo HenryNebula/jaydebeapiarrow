@@ -40,6 +40,33 @@ from jaydebeapiarrow.lib.arrow_utils import \
     fetch_next_batch
 
 
+def set_debug(enabled=True):
+    """Enable or disable debug logging from the Java bridge (JUL FINE level).
+
+    This controls java.util.logging for the org.jaydebeapiarrow.extension
+    package. By default only INFO and above is printed; calling
+    ``set_debug(True)`` enables column mapping, parameter binding, and
+    other diagnostic messages.
+
+    Must be called *after* the JVM has been started (i.e. after
+    ``connect()``). Calling before the JVM starts is a no-op.
+
+    Args:
+        enabled: True to enable debug logging, False to disable.
+    """
+    import jpype
+    if not jpype.isJVMStarted():
+        return
+    Level = jpype.JClass("java.util.logging.Level")
+    target_level = Level.FINE if enabled else Level.INFO
+    logger = jpype.JClass("java.util.logging.Logger").getLogger(
+        "org.jaydebeapiarrow.extension"
+    )
+    logger.setLevel(target_level)
+    for handler in jpype.JClass("java.util.logging.Logger").getLogger("").getHandlers():
+        handler.setLevel(target_level)
+
+
 def reraise(tp, value, tb=None):
     if value is None:
         value = tp()
