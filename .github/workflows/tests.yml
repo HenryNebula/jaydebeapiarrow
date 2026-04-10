@@ -58,6 +58,17 @@ jobs:
         key: ${{ matrix.plattform }}-${{ matrix.python-version }}-maven-${{ hashFiles('**/pom.xml') }}
         restore-keys: |
           ${{ matrix.plattform }}-${{ matrix.python-version }}-maven-
+    - name: JARs cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          jaydebeapiarrow/lib/
+          test/jars/
+          arrow-jdbc-extension/target/
+          mockdriver/target/
+        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-jars-
     - name: Pip cache
       uses: actions/cache@v3
       with:
@@ -150,6 +161,17 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
+    - name: JARs cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          jaydebeapiarrow/lib/
+          test/jars/
+          arrow-jdbc-extension/target/
+          mockdriver/target/
+        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-jars-
     - name: Pip cache
       uses: actions/cache@v3
       with:
@@ -192,6 +214,17 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
+    - name: JARs cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          jaydebeapiarrow/lib/
+          test/jars/
+          arrow-jdbc-extension/target/
+          mockdriver/target/
+        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-jars-
     - name: Start DB2 container
       run: |
         docker run -d --name db2 --privileged \
@@ -244,6 +277,17 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
+    - name: JARs cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          jaydebeapiarrow/lib/
+          test/jars/
+          arrow-jdbc-extension/target/
+          mockdriver/target/
+        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-jars-
     - name: Start Drill container
       run: |
         docker run -d --name drill \

@@ -1,38 +1,41 @@
-# This workflows will upload a Python Package using Twine when a release is created
-# For more information see: https://help.github.com/en/actions/language-and-framework-guides/using-python-with-github-actions#publishing-to-package-registries
-
-name: Upload Python Package
+name: Publish to PyPI
 
 on:
   release:
-    types: [created]
+    types: [published]
   workflow_dispatch:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
     - name: Set up JDK
-      uses: actions/setup-java@v3
+      uses: actions/setup-java@v4
       with:
-        java-version: '8'
+        java-version: '11'
         distribution: 'temurin'
         cache: maven
+    - name: Cache built JARs
+      uses: actions/cache@v3
+      with:
+        path: |
+          jaydebeapiarrow/lib/
+          test/jars/
+          arrow-jdbc-extension/target/
+          mockdriver/target/
+        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-jars-
     - name: Build with Maven
-      run: |
-        cd ./arrow-jdbc-extension && mvn clean compile assembly:single && cd ..
-        cp ./arrow-jdbc-extension/target/arrow-jdbc*.jar ./jaydebeapiarrow/lib
+      run: bash test/build.sh
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.x'
-    - name: Install dependencies
-      run: |
-        python3 -m pip install --upgrade pip
-        python3 -m pip install setuptools build
+    - name: Install build tools
+      run: pip install build
     - name: Build wheel and tarball
       run: python3 -m build
     - name: Store artifact
@@ -42,9 +45,8 @@ jobs:
         path: dist/
 
   publish-to-testpypi:
-    name: Publish Python distribution to TestPyPI
-    needs:
-    - build
+    name: Publish to TestPyPI
+    needs: build
     runs-on: ubuntu-latest
 
     environment:
@@ -52,58 +54,36 @@ jobs:
       url: https://test.pypi.org/p/JayDeBeApiArrow
 
     permissions:
-      id-token: write  # IMPORTANT: mandatory for trusted publishing
+      id-token: write
 
     steps:
-    - name: Download all the dists
+    - name: Download dists
       uses: actions/download-artifact@v4
       with:
         name: python-package-distributions
         path: dist/
-    - name: Publish distribution to TestPyPI
+    - name: Publish to TestPyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         repository-url: https://test.pypi.org/legacy/
 
-  # github-release:
-  #   name: >-
-  #     Sign the Python distribution with Sigstore
-  #     and upload them to GitHub Release
-  #   needs:
-  #   - publish-to-testpypi
-  #   runs-on: ubuntu-latest
+  publish-to-pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
 
-  #   permissions:
-  #     contents: write  # IMPORTANT: mandatory for making GitHub Releases
-  #     id-token: write  # IMPORTANT: mandatory for sigstore
+    environment:
+      name: pypi
+      url: https://pypi.org/p/JayDeBeApiArrow
 
-  #   steps:
-  #   - name: Download all the dists
-  #     uses: actions/download-artifact@v4
-  #     with:
-  #       name: python-package-distributions
-  #       path: dist/
-  #   - name: Sign the dists with Sigstore
-  #     uses: sigstore/gh-action-sigstore-python@v1.2.3
-  #     with:
-  #       inputs: >-
-  #         ./dist/*.tar.gz
-  #         ./dist/*.whl
-  #   - name: Create GitHub Release
-  #     env:
-  #       GITHUB_TOKEN: ${{ github.token }}
-  #     run: >-
-  #       gh release create
-  #       '${{ github.ref_name }}'
-  #       --repo '${{ github.repository }}'
-  #       --notes ""
-  #   - name: Upload artifact signatures to GitHub Release
-  #     env:
-  #       GITHUB_TOKEN: ${{ github.token }}
-  #     # Upload to GitHub Release using the `gh` CLI.
-  #     # `dist/` contains the built packages, and the
-  #     # sigstore-produced signatures and certificates.
-  #     run: >-
-  #       gh release upload
-  #       '${{ github.ref_name }}' dist/**
-  #       --repo '${{ github.repository }}'
+    permissions:
+      id-token: write
+
+    steps:
+    - name: Download dists
+      uses: actions/download-artifact@v4
+      with:
+        name: python-package-distributions
+        path: dist/
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
