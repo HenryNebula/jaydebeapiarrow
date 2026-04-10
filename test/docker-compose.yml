@@ -104,14 +104,14 @@ services:
     container_name: jaydebeapi-test-trino
     ports:
       - "8080:8080"
+    environment:
+      CATALOG_MANAGEMENT: dynamic
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/v1/info || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 30s
-    volumes:
-      - ./data/trino/etc/catalog/memory.properties:/etc/trino/catalog/memory.properties:ro
 
 volumes:
   postgres_data:

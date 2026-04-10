@@ -91,6 +91,8 @@ case $DB in
       echo "  Waiting for Trino..."
       sleep 3
     done
+    echo "Creating memory catalog..."
+    docker-compose exec -T trino trino --execute 'CREATE CATALOG memory USING memory;' 2>/dev/null || echo "  Catalog may already exist"
     echo "Trino is ready at localhost:8080"
     echo "  Catalog: memory"
     echo "  Schema: default"
@@ -146,6 +148,8 @@ case $DB in
       echo "  Waiting for Trino..."
       sleep 3
     done
+    echo "Creating Trino memory catalog..."
+    docker-compose exec -T trino trino --execute 'CREATE CATALOG memory USING memory;' 2>/dev/null || echo "  Catalog may already exist"
     echo "Trino is ready at localhost:8080"
 
     echo ""

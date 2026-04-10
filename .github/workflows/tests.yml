@@ -245,6 +245,8 @@ jobs:
         image: trinodb/trino:461
         ports:
           - 8080:8080
+        env:
+          CATALOG_MANAGEMENT: dynamic
         options: >-
           --name trino
           --health-cmd "curl -sf http://localhost:8080/v1/info"
@@ -252,15 +254,11 @@ jobs:
           --health-timeout 5s
           --health-retries 10
           --health-start-period 30s
-        volumes:
-          - ${{ github.workspace }}/test/data/trino/etc/catalog/memory.properties:/etc/trino/catalog/memory.properties:ro
 
     steps:
     - uses: actions/checkout@v4
-    - name: Restart Trino after checkout
-      uses: docker://docker
-      with:
-        args: docker restart trino
+    - name: Create memory catalog in Trino
+      run: docker exec trino trino --execute 'CREATE CATALOG memory USING memory;' || echo "Catalog may already exist"
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
