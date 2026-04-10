@@ -31,7 +31,7 @@ import threading
 import unittest
 
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import namedtuple
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -309,7 +309,7 @@ class SqlitePyTest(SqliteTestBase, unittest.TestCase):
 
 class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
 
-    JDBC_SUPPORT_TEMPORAL_TYPE = False
+    JDBC_SUPPORT_TEMPORAL_TYPE = True
 
     def connect(self):
         #http://bitbucket.org/xerial/sqlite-jdbc
@@ -320,11 +320,74 @@ class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
         }
         return jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args=properties)
 
+    def test_execute_and_fetch(self):
+        """SQLite date_string_format truncates microseconds."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING " \
+                        "from ACCOUNT")
+            result = cursor.fetchall()
+        self.assertEqual(result, [
+            (
+            datetime(2009, 9, 10, 14, 15, 22),
+            18, Decimal('12.4'), None),
+            (
+            datetime(2009, 9, 11, 14, 15, 22),
+            19, Decimal('12.9'), Decimal('1'))
+        ])
+
+    def test_execute_and_fetch_parameter(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING " \
+                        "from ACCOUNT where ACCOUNT_NO = ?", (18,))
+            result = cursor.fetchall()
+        self.assertEqual(result, [
+            (
+            datetime(2009, 9, 10, 14, 15, 22),
+            18, Decimal('12.4'), None)
+        ])
+
+    def test_execute_and_fetchone(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING " \
+                        "from ACCOUNT order by ACCOUNT_NO")
+            result = cursor.fetchone()
+        self.assertEqual(result, (
+            datetime(2009, 9, 10, 14, 15, 22),
+            18, Decimal('12.4'), None))
+        cursor.close()
+
+    def test_execute_and_fetchone_consecutive(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING " \
+                        "from ACCOUNT order by ACCOUNT_NO")
+            result1 = cursor.fetchone()
+            result2 = cursor.fetchone()
+
+        self.assertEqual(result1, (
+            datetime(2009, 9, 10, 14, 15, 22),
+            18, Decimal('12.4'), None))
+
+        self.assertEqual(result2, (
+            datetime(2009, 9, 11, 14, 15, 22),
+            19, Decimal('12.9'), Decimal('1')))
+
+    def test_execute_and_fetchmany(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING " \
+                        "from ACCOUNT order by ACCOUNT_NO")
+            result = cursor.fetchmany()
+        self.assertEqual(result, [
+            (
+            datetime(2009, 9, 10, 14, 15, 22),
+            18, Decimal('12.4'), None)
+        ])
+
     def test_execute_types(self):
         """
         xerial/sqlite-jdbc has some issues with type mapping:
         1. Timestamp has inconsistent types: JDBC returns it as a VARCHAR, while it's defined as a TIMESTAMP in the DB
         2. Default date_string_format does not handle ISO Date (without microseconds)
+        3. SQLite stores DECIMAL values with dynamic typing (integer vs double)
         """
         stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, " \
                "BLOCKING, DBL_COL, OPENED_AT, VALID, PRODUCT_NAME) " \
@@ -334,7 +397,7 @@ class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
         balance = Decimal('1.2')
         blocking = Decimal('10.0')
         dbl_col = 3.5
-        opened_at = self.dbapi.Timestamp(2008, 2, 27, 0, 0, 0) 
+        opened_at = self.dbapi.Timestamp(2008, 2, 27, 0, 0, 0)
         valid = True
         product_name = u'Savings account'
         parms = (
@@ -353,10 +416,35 @@ class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
             result = cursor.fetchone()
 
         exp = (
-            account_id.strftime(r'%Y-%m-%d %H:%M:%S'),
+            account_id,
             account_no, balance, blocking, dbl_col,
             opened_at.date(),
             valid, product_name
+        )
+        self.assertEqual(result, exp)
+
+    def test_execute_type_time(self):
+        """SQLite date_string_format truncates microseconds."""
+        stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, " \
+               "OPENED_AT_TIME) " \
+               "values (?, ?, ?, ?)"
+        account_id = self.dbapi.Timestamp(2010, 1, 26, 14, 31, 59)
+        account_no = 20
+        balance = 1.2
+        opened_at_time = self.dbapi.Time(13, 59, 59)
+        parms = (account_id, account_no, balance, opened_at_time)
+        with self.conn.cursor() as cursor:
+            cursor.execute(stmt, parms)
+            stmt = "select ACCOUNT_ID, ACCOUNT_NO, BALANCE, OPENED_AT_TIME " \
+                "from ACCOUNT where ACCOUNT_NO = ?"
+            parms = (20, )
+            cursor.execute(stmt, parms)
+            result = cursor.fetchone()
+
+        exp = (
+            account_id,
+            account_no, Decimal(str(balance)),
+            self._cast_time('13:59:59', r'%H:%M:%S')
         )
         self.assertEqual(result, exp)
 
@@ -405,6 +493,58 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_postgres.sql'))
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert.sql'))
 
+    def test_execute_timestamptz_roundtrip_non_utc_session(self):
+        """Test TIMESTAMPTZ read/write with a non-UTC session timezone.
+
+        Sets the session to Australia/Sydney (UTC+10 standard / UTC+11 DST),
+        inserts a naive string via SQL (interpreted as Sydney local time by PG),
+        then verifies our Arrow bridge correctly normalizes to UTC on read.
+        """
+        with self.conn.cursor() as cursor:
+            # Use a timezone with DST to make this a real test
+            cursor.execute("SET TIME ZONE 'Australia/Sydney'")
+            # Insert via raw SQL — PG interprets this as Sydney time
+            # January = AEDT (UTC+11), so 10:30 local = 23:30 previous day UTC
+            cursor.execute(
+                "INSERT INTO ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, ACCOUNT_ID_TZ) "
+                "VALUES ('2024-01-15 10:30:00', 30, 5.0, '2024-01-15 10:30:00')"
+            )
+
+            # Read back via Arrow bridge — should normalize to UTC
+            cursor.execute("SELECT ACCOUNT_ID, ACCOUNT_ID_TZ FROM ACCOUNT WHERE ACCOUNT_NO = 30")
+            result = cursor.fetchone()
+
+        # ACCOUNT_ID (plain TIMESTAMP) is NOT affected by timezone — returns as-is
+        self.assertEqual(result[0], datetime(2024, 1, 15, 10, 30, 0))
+        self.assertIsNone(result[0].tzinfo)
+
+        # ACCOUNT_ID_TZ (TIMESTAMPTZ) is normalized to UTC by the bridge
+        # 10:30 AEDT (UTC+11) = 2024-01-14 23:30:00 UTC
+        self.assertEqual(result[1], datetime(2024, 1, 14, 23, 30, 0, tzinfo=timezone.utc))
+        self.assertIsNotNone(result[1].tzinfo)
+
+    def test_execute_timestamptz_roundtrip_param_binding(self):
+        """Test writing a TZ-aware datetime via parameter binding and reading back."""
+        # Reset to UTC for a clean parameter-binding round-trip
+        with self.conn.cursor() as cursor:
+            cursor.execute("SET TIME ZONE 'UTC'")
+            naive_id = datetime(2024, 6, 15, 10, 30, 0)
+            tz_dt = datetime(2024, 6, 15, 10, 30, 0, tzinfo=timezone.utc)
+            cursor.execute(
+                "INSERT INTO ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, ACCOUNT_ID_TZ) "
+                "VALUES (?, ?, ?, ?)",
+                (naive_id, 31, Decimal('5.0'), tz_dt)
+            )
+            cursor.execute("SELECT ACCOUNT_ID, ACCOUNT_ID_TZ FROM ACCOUNT WHERE ACCOUNT_NO = 31")
+            result = cursor.fetchone()
+
+        # ACCOUNT_ID (TIMESTAMP) should be naive
+        self.assertEqual(result[0], datetime(2024, 6, 15, 10, 30, 0))
+        self.assertIsNone(result[0].tzinfo)
+        # ACCOUNT_ID_TZ (TIMESTAMPTZ) should be timezone-aware (UTC)
+        self.assertEqual(result[1], datetime(2024, 6, 15, 10, 30, 0, tzinfo=timezone.utc))
+        self.assertIsNotNone(result[1].tzinfo)
+
 
 class MySQLTest(IntegrationTestBase, unittest.TestCase):
 
@@ -434,6 +574,333 @@ class MySQLTest(IntegrationTestBase, unittest.TestCase):
     def setUpSql(self):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_mysql.sql'))
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert.sql'))
+
+
+class MSSQLTest(IntegrationTestBase, unittest.TestCase):
+
+    def connect(self):
+
+        import jpype
+
+        host = os.environ.get("JY_MSSQL_HOST", "localhost")
+        port = os.environ.get("JY_MSSQL_PORT", "1433")
+        user = os.environ.get("JY_MSSQL_USER", "sa")
+        password = os.environ.get("JY_MSSQL_PASSWORD", "Password123!")
+
+        driver, url, driver_args = (
+            'com.microsoft.sqlserver.jdbc.SQLServerDriver',
+            f'jdbc:sqlserver://{host}:{port};encrypt=false;trustServerCertificate=true',
+            {'user': user, 'password': password}
+        )
+
+        try:
+            db, conn = jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args)
+        except jpype.JException:
+            self.skipTest("Can not connect with MS SQL Server. Please check if the instance is up and running.")
+        else:
+            return db, conn
+
+    def setUpSql(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("IF DB_ID('test_db') IS NULL CREATE DATABASE test_db")
+            cursor.execute("USE test_db")
+        self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_mssql.sql'))
+        self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert.sql'))
+
+    def tearDown(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("USE test_db")
+        super().tearDown()
+
+
+class TrinoTest(IntegrationTestBase, unittest.TestCase):
+
+    def connect(self):
+
+        import jpype
+
+        host = os.environ.get("JY_TRINO_HOST", "localhost")
+        port = os.environ.get("JY_TRINO_PORT", "8080")
+        user = os.environ.get("JY_TRINO_USER", "test")
+
+        driver, url, driver_args = (
+            'io.trino.jdbc.TrinoDriver',
+            f'jdbc:trino://{host}:{port}/memory/default',
+            {'user': user}
+        )
+
+        try:
+            db, conn = jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args)
+        except jpype.JException:
+            self.skipTest("Can not connect with Trino. Please check if the instance is up and running.")
+        else:
+            return db, conn
+
+    def setUpSql(self):
+        self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_trino.sql'))
+        self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert.sql'))
+
+    def tearDown(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS ACCOUNT")
+        self.conn.close()
+
+
+class OracleTest(IntegrationTestBase, unittest.TestCase):
+
+    def connect(self):
+
+        import jpype
+
+        host = os.environ.get("JY_ORACLE_HOST", "localhost")
+        port = os.environ.get("JY_ORACLE_PORT", "1521")
+        user = os.environ.get("JY_ORACLE_USER", "system")
+        password = os.environ.get("JY_ORACLE_PASSWORD", "Password123!")
+
+        driver, url, driver_args = (
+            'oracle.jdbc.OracleDriver',
+            f'jdbc:oracle:thin:@{host}:{port}/XEPDB1',
+            {'user': user, 'password': password}
+        )
+
+        try:
+            db, conn = jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args)
+        except jpype.JException:
+            self.skipTest("Can not connect with Oracle. Please check if the instance is up and running.")
+        else:
+            return db, conn
+
+    def setUpSql(self):
+        self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_oracle.sql'))
+        self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert_oracle.sql'))
+
+    def test_execute_types(self):
+        """Oracle uses NUMBER(1) instead of BOOLEAN — VALID returns int not bool."""
+        stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, " \
+               "BLOCKING, DBL_COL, OPENED_AT, VALID, PRODUCT_NAME) " \
+               "values (?, ?, ?, ?, ?, ?, ?, ?)"
+        account_id = self.dbapi.Timestamp(2010, 1, 26, 14, 31, 59)
+        account_no = 20
+        balance = Decimal('1.2')
+        blocking = 10.0
+        dbl_col = 3.5
+        opened_at = self.dbapi.Date(1908, 2, 27)
+        valid = 1
+        product_name = u'Savings account'
+        parms = (account_id, account_no, balance, blocking, dbl_col,
+                 opened_at, valid, product_name)
+        with self.conn.cursor() as cursor:
+            cursor.execute(stmt, parms)
+            stmt = "select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING, " \
+                "DBL_COL, OPENED_AT, VALID, PRODUCT_NAME " \
+                "from ACCOUNT where ACCOUNT_NO = ?"
+            parms = (20, )
+            cursor.execute(stmt, parms)
+            result = cursor.fetchone()
+        exp = (
+            self._cast_datetime('2010-01-26 14:31:59', r'%Y-%m-%d %H:%M:%S'),
+            account_no, balance, blocking, dbl_col,
+            self._cast_date('1908-02-27', r'%Y-%m-%d'),
+            valid, product_name
+        )
+        self.assertEqual(result, exp)
+
+    def test_execute_type_time(self):
+        """Oracle has no native TIME type — OPENED_AT_TIME is TIMESTAMP."""
+        stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, " \
+               "OPENED_AT_TIME) " \
+               "values (?, ?, ?, ?)"
+        account_id = self.dbapi.Timestamp(2010, 1, 26, 14, 31, 59)
+        account_no = 20
+        balance = 1.2
+        opened_at_time = self.dbapi.Timestamp(1970, 1, 1, 13, 59, 59)
+        parms = (account_id, account_no, balance, opened_at_time)
+        with self.conn.cursor() as cursor:
+            cursor.execute(stmt, parms)
+            stmt = "select ACCOUNT_ID, ACCOUNT_NO, BALANCE, OPENED_AT_TIME " \
+                "from ACCOUNT where ACCOUNT_NO = ?"
+            parms = (20, )
+            cursor.execute(stmt, parms)
+            result = cursor.fetchone()
+
+        exp = (
+            self._cast_datetime('2010-01-26 14:31:59', r'%Y-%m-%d %H:%M:%S'),
+            account_no, Decimal(str(balance)),
+            self._cast_datetime('1970-01-01 13:59:59', r'%Y-%m-%d %H:%M:%S')
+        )
+        self.assertEqual(result, exp)
+
+
+class DB2Test(IntegrationTestBase, unittest.TestCase):
+
+    def connect(self):
+
+        import jpype
+
+        host = os.environ.get("JY_DB2_HOST", "localhost")
+        port = os.environ.get("JY_DB2_PORT", "50000")
+        user = os.environ.get("JY_DB2_USER", "db2inst1")
+        password = os.environ.get("JY_DB2_PASSWORD", "Password123!")
+
+        driver, url, driver_args = (
+            'com.ibm.db2.jcc.DB2Driver',
+            f'jdbc:db2://{host}:{port}/test_db',
+            {'user': user, 'password': password}
+        )
+
+        try:
+            db, conn = jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args)
+        except jpype.JException:
+            self.skipTest("Can not connect with DB2. Please check if the instance is up and running.")
+        else:
+            return db, conn
+
+    def setUpSql(self):
+        self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_db2.sql'))
+        self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert.sql'))
+
+    def test_execute_types(self):
+        """DB2 uses SMALLINT instead of BOOLEAN — VALID returns int not bool."""
+        stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, " \
+               "BLOCKING, DBL_COL, OPENED_AT, VALID, PRODUCT_NAME) " \
+               "values (?, ?, ?, ?, ?, ?, ?, ?)"
+        account_id = self.dbapi.Timestamp(2010, 1, 26, 14, 31, 59)
+        account_no = 20
+        balance = Decimal('1.2')
+        blocking = 10.0
+        dbl_col = 3.5
+        opened_at = self.dbapi.Date(1908, 2, 27)
+        valid = 1
+        product_name = u'Savings account'
+        parms = (account_id, account_no, balance, blocking, dbl_col,
+                 opened_at, valid, product_name)
+        with self.conn.cursor() as cursor:
+            cursor.execute(stmt, parms)
+            stmt = "select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING, " \
+                "DBL_COL, OPENED_AT, VALID, PRODUCT_NAME " \
+                "from ACCOUNT where ACCOUNT_NO = ?"
+            parms = (20, )
+            cursor.execute(stmt, parms)
+            result = cursor.fetchone()
+        exp = (
+            self._cast_datetime('2010-01-26 14:31:59', r'%Y-%m-%d %H:%M:%S'),
+            account_no, balance, blocking, dbl_col,
+            self._cast_date('1908-02-27', r'%Y-%m-%d'),
+            valid, product_name
+        )
+        self.assertEqual(result, exp)
+
+
+class DrillTest(IntegrationTestBase, unittest.TestCase):
+
+    def connect(self):
+
+        import jpype
+
+        host = os.environ.get("JY_DRILL_HOST", "localhost")
+        port = os.environ.get("JY_DRILL_PORT", "31010")
+
+        driver, url, driver_args = (
+            'org.apache.drill.jdbc.Driver',
+            f'jdbc:drill:drillbit={host}:{port}',
+            None
+        )
+
+        try:
+            db, conn = jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args)
+        except jpype.JException:
+            self.skipTest("Can not connect with Drill. Please check if the instance is up and running.")
+        else:
+            return db, conn
+
+    def setUpSql(self):
+        self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_drill.sql'))
+
+    def tearDown(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS dfs.tmp.account")
+        self.conn.close()
+
+    def _query_table(self, cursor):
+        cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING "
+                       "from dfs.tmp.account")
+
+    def test_executemany(self):
+        """Drill has no INSERT INTO ... VALUES — skip executemany test."""
+        self.skipTest("Drill does not support INSERT INTO ... VALUES")
+
+    def test_execute_types(self):
+        """Drill has no INSERT INTO ... VALUES — skip types test."""
+        self.skipTest("Drill does not support INSERT INTO ... VALUES")
+
+    def test_execute_type_time(self):
+        """Drill has no INSERT INTO ... VALUES — skip time test."""
+        self.skipTest("Drill does not support INSERT INTO ... VALUES")
+
+    def test_execute_type_blob(self):
+        """Drill has no INSERT INTO ... VALUES — skip blob test."""
+        self.skipTest("Drill does not support INSERT INTO ... VALUES")
+
+    def test_execute_different_rowcounts(self):
+        """Drill has no INSERT INTO ... VALUES — skip rowcount test."""
+        self.skipTest("Drill does not support INSERT INTO ... VALUES")
+
+    def test_execute_reset_description_without_execute_result(self):
+        """Drill has no DELETE — verify description reset with SELECT only."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("select * from dfs.tmp.account")
+            self.assertIsNotNone(cursor.description)
+            cursor.fetchone()
+
+    def test_execute_and_fetch(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING "
+                           "from dfs.tmp.account")
+            result = cursor.fetchall()
+        self.assertEqual(result, [
+            (
+            self._cast_datetime('2009-09-10 14:15:22.123', r'%Y-%m-%d %H:%M:%S.%f'),
+            18, Decimal('12.40'), None),
+            (
+            self._cast_datetime('2009-09-11 14:15:22.123', r'%Y-%m-%d %H:%M:%S.%f'),
+            19, Decimal('12.90'), Decimal('1'))
+        ])
+
+    def test_execute_and_fetchone(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING "
+                           "from dfs.tmp.account order by ACCOUNT_NO")
+            result = cursor.fetchone()
+        self.assertEqual(result, (
+            self._cast_datetime('2009-09-10 14:15:22.123', r'%Y-%m-%d %H:%M:%S.%f'),
+            18, Decimal('12.40'), None))
+        cursor.close()
+
+    def test_execute_and_fetchone_consecutive(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING "
+                           "from dfs.tmp.account order by ACCOUNT_NO")
+            result1 = cursor.fetchone()
+            result2 = cursor.fetchone()
+
+        self.assertEqual(result1, (
+            self._cast_datetime('2009-09-10 14:15:22.123', r'%Y-%m-%d %H:%M:%S.%f'),
+            18, Decimal('12.40'), None))
+
+        self.assertEqual(result2, (
+            self._cast_datetime('2009-09-11 14:15:22.123', r'%Y-%m-%d %H:%M:%S.%f'),
+            19, Decimal('12.90'), Decimal('1')))
+
+    def test_execute_and_fetchmany(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING "
+                           "from dfs.tmp.account order by ACCOUNT_NO")
+            result = cursor.fetchmany()
+        self.assertEqual(result, [
+            (
+            self._cast_datetime('2009-09-10 14:15:22.123', r'%Y-%m-%d %H:%M:%S.%f'),
+            18, Decimal('12.40'), None)
+        ])
 
 
 class PropertiesDriverArgsPassingTest(unittest.TestCase):

@@ -94,3 +94,185 @@ jobs:
 #      uses: baztian/coveralls-python-action@new-merged-changes
 #      with:
 #        parallel-finished: true
+
+  test-new-dbs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      matrix:
+        python-version: [3.11]
+        db: [oracle, mssql, trino]
+
+    services:
+      oracle:
+        image: gvenzl/oracle-xe:21-slim
+        env:
+          ORACLE_PASSWORD: Password123!
+        ports:
+          - 1521:1521
+        options: >-
+          --health-cmd "echo 'SELECT 1 FROM DUAL;' | sqlplus -S system/Password123!@localhost/XEPDB1"
+          --health-interval 15s
+          --health-timeout 10s
+          --health-retries 30
+          --health-start-period 120s
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: "Password123!"
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Password123!' -C -Q 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 30s
+      trino:
+        image: trinodb/trino:461
+        ports:
+          - 8080:8080
+        options: >-
+          --health-cmd "curl -sf http://localhost:8080/v1/info"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 30s
+        volumes:
+          - ./test/data/trino/etc/catalog/memory.properties:/etc/trino/catalog/memory.properties:ro
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Pip cache
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-py${{ matrix.python-version }}-pip-${{ hashFiles('**/*requirements.txt', 'tox.ini', 'setup.py') }}
+        restore-keys: |
+          ${{ runner.os }}-py${{ matrix.python-version }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install tox tox-gh-actions
+    - name: Test with tox
+      run: tox -e py311-driver-${{ matrix.db }}
+      env:
+        JY_ORACLE_HOST: localhost
+        JY_ORACLE_PORT: "1521"
+        JY_ORACLE_USER: system
+        JY_ORACLE_PASSWORD: Password123!
+        JY_MSSQL_HOST: localhost
+        JY_MSSQL_PORT: "1433"
+        JY_MSSQL_USER: sa
+        JY_MSSQL_PASSWORD: "Password123!"
+        JY_TRINO_HOST: localhost
+        JY_TRINO_PORT: "8080"
+        JY_TRINO_USER: test
+
+  test-db2:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      matrix:
+        python-version: [3.11]
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Start DB2 container
+      run: |
+        docker run -d --name db2 --privileged \
+          -p 50000:50000 \
+          -e LICENSE=accept \
+          -e DB2INST1_PASSWORD=Password123! \
+          -e DBNAME=test_db \
+          ibmcom/db2:11.5.8.0
+        echo "Waiting for DB2 to be ready (this may take 5+ minutes)..."
+        for i in $(seq 1 60); do
+          if docker exec db2 su - db2inst1 -c "db2 connect to test_db" >/dev/null 2>&1; then
+            echo "DB2 is ready!"
+            break
+          fi
+          echo "  Waiting... ($i/60)"
+          sleep 10
+        done
+    - name: Pip cache
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-py${{ matrix.python-version }}-pip-${{ hashFiles('**/*requirements.txt', 'tox.ini', 'setup.py') }}
+        restore-keys: |
+          ${{ runner.os }}-py${{ matrix.python-version }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install tox tox-gh-actions
+    - name: Test with tox
+      run: tox -e py311-driver-db2
+      env:
+        JY_DB2_HOST: localhost
+        JY_DB2_PORT: "50000"
+        JY_DB2_USER: db2inst1
+        JY_DB2_PASSWORD: "Password123!"
+
+  test-drill:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      matrix:
+        python-version: [3.11]
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Start Drill container
+      run: |
+        docker run -d --name drill \
+          -p 31010:31010 \
+          -p 8047:8047 \
+          apache/drill:1.21.0
+        echo "Waiting for Drill to be ready..."
+        for i in $(seq 1 30); do
+          if curl -sf http://localhost:8047/stats.json >/dev/null 2>&1; then
+            echo "Drill is ready!"
+            break
+          fi
+          echo "  Waiting... ($i/30)"
+          sleep 5
+        done
+    - name: Pip cache
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-py${{ matrix.python-version }}-pip-${{ hashFiles('**/*requirements.txt', 'tox.ini', 'setup.py') }}
+        restore-keys: |
+          ${{ runner.os }}-py${{ matrix.python-version }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install tox tox-gh-actions
+    - name: Test with tox
+      run: tox -e py311-driver-drill
+      env:
+        JY_DRILL_HOST: localhost
+        JY_DRILL_PORT: "31010"
