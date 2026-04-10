@@ -22,7 +22,6 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.Calendar;
 import java.util.TimeZone;
-import java.util.logging.Logger;
 import java.util.List;
 import java.util.logging.Logger;
 
@@ -70,17 +69,22 @@ public class JDBCUtils {
             JdbcParameterBinder.Builder builder = JdbcParameterBinder.builder(statement, root);
             List<FieldVector> vectors = root.getFieldVectors();
 
-            logger.info("Preparing statement with " + vectors.size() + " parameters.");
+            logger.fine("Preparing statement with " + vectors.size() + " parameters.");
 
             for (int i = 0; i < vectors.size(); i++) {
                 FieldVector vector = vectors.get(i);
                 int paramIndex = i + 1; // JDBC is 1-based
                 
-                // Check if the vector is a Timestamp type
+                // Check if the vector is a Timestamp type.
+                // TimeStampBinder handles both naive (TimeStampMicroVector) and
+                // timezone-aware (TimeStampMicroTZVector) vectors because both extend
+                // TimeStampVector. It auto-detects the timezone via isZoned() and
+                // selects the appropriate JDBC type. The UTC calendar ensures proper
+                // TZ conversion on the JDBC side.
                 if (vector instanceof TimeStampVector) {
                     // Instantiate your custom binder for this specific vector
                     builder.bind(paramIndex, new TimeStampBinder((TimeStampVector) vector, utcCalendar));
-                    logger.info("Binding TimestampVector at param index " + paramIndex);
+                    logger.fine("Binding TimestampVector at param index " + paramIndex);
                 }
                 else if (vector instanceof DateDayVector) {
                     // Date (Day precision - 32 bit)
@@ -123,7 +127,7 @@ public class JDBCUtils {
                 }
                 binder.reset();
             }
-            System.out.println("Executing batch: " + statement.toString());
+            logger.fine("Executing batch: " + statement.toString());
         }
         catch (Exception e) {
             logger.severe("Error preparing statement from stream: " + e.getMessage());
@@ -137,6 +141,7 @@ public class JDBCUtils {
         JdbcToArrowConfig arrow_jdbc_config = (
             new JdbcToArrowConfigBuilder()
             .setAllocator(allocator)
+            .setCalendar(utcCalendar)
             .setTargetBatchSize(batchSize)
             .setBigDecimalRoundingMode(RoundingMode.UNNECESSARY)
             .setExplicitTypesByColumnIndex(new ExplicitTypeMapper().createExplicitTypeMapping(resultSet))

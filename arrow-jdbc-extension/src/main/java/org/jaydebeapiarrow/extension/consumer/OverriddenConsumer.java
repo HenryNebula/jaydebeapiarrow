@@ -17,6 +17,7 @@
 
 package org.jaydebeapiarrow.extension.consumer;
 
+import java.math.RoundingMode;
 import java.util.Calendar;
 import java.util.TimeZone;
 import java.sql.Types;
@@ -41,10 +42,16 @@ public class OverriddenConsumer {
     public ArrowType getJdbcToArrowTypeConverter(final JdbcFieldInfo fieldInfo) {
         switch (fieldInfo.getJdbcType()) {
             case Types.TIMESTAMP_WITH_TIMEZONE:
-                final String timezone = Calendar.getInstance(TimeZone.getTimeZone("UTC")).getTimeZone().getID();
-                return new ArrowType.Timestamp(TimeUnit.MICROSECOND, timezone);
+                return new ArrowType.Timestamp(TimeUnit.MICROSECOND, "UTC");
             case Types.TIMESTAMP:
                 return new ArrowType.Timestamp(TimeUnit.MICROSECOND, null);
+            case Types.DECIMAL:
+            case Types.NUMERIC:
+                int precision = fieldInfo.getPrecision();
+                int scale = fieldInfo.getScale();
+                if (precision <= 0) precision = 38;
+                if (scale <= 0) scale = 17;
+                return new ArrowType.Decimal(precision, scale, 128);
             default:
                 return JdbcToArrowUtils.getArrowTypeFromJdbcType(fieldInfo, null);
         }
@@ -76,6 +83,12 @@ public class OverriddenConsumer {
                 else {
                     return TimestampTZConsumer.createConsumer((TimeStampMicroTZVector) vector, columnIndex, nullable, calendar);
                 }
+            case Decimal:
+                return DecimalConsumer.createConsumer(
+                        (DecimalVector) vector, columnIndex, nullable,
+                        config.getBigDecimalRoundingMode() != null
+                                ? config.getBigDecimalRoundingMode()
+                                : RoundingMode.HALF_UP);
             default:
                 return JdbcToArrowUtils.getConsumer(arrowType, columnIndex, nullable, vector, config);
         }

@@ -55,7 +55,7 @@ public class ExplicitTypeMapper {
         }
 
         String[][] columnMetaDataArray = new String[tabularMetaData.size()][];
-        logger.info("\n" + FlipTable.of(
+        logger.fine("\n" + FlipTable.of(
                 headers,
                 tabularMetaData.toArray(columnMetaDataArray)
         ));
@@ -92,8 +92,34 @@ public class ExplicitTypeMapper {
         /* inferred as Decimal */
         for (int columnIndex: parsedMetaData.getOrDefault(Types.INTEGER, new ArrayList<>())) {
             if (resultSet.getMetaData().getColumnName(columnIndex).contains("DECIMAL")) {
-                logger.info(String.format("Inferred column %1s (%2s) as a Decimal", columnIndex, resultSet.getMetaData().getColumnName(columnIndex)));
+                logger.fine(String.format("Inferred column %1s (%2s) as a Decimal", columnIndex, resultSet.getMetaData().getColumnName(columnIndex)));
                 decimalColumnIndices.add(columnIndex);
+            }
+        }
+
+        /* Detect TIMESTAMPTZ columns (e.g., PostgreSQL reports them as Types.TIMESTAMP) */
+        List<Integer> timestamptzColumnIndices = new ArrayList<>();
+        for (int columnIndex = 1; columnIndex <= resultSet.getMetaData().getColumnCount(); columnIndex++) {
+            int columnType = resultSet.getMetaData().getColumnType(columnIndex);
+            String columnTypeName = resultSet.getMetaData().getColumnTypeName(columnIndex);
+            if (columnType == Types.TIMESTAMP && "timestamptz".equalsIgnoreCase(columnTypeName)) {
+                timestamptzColumnIndices.add(columnIndex);
+                logger.fine(String.format("Detected column %1s (%2s) as TIMESTAMPTZ, overriding to TIMESTAMP_WITH_TIMEZONE",
+                        columnIndex, resultSet.getMetaData().getColumnName(columnIndex)));
+            }
+        }
+        for (int columnIndex : timestamptzColumnIndices) {
+            explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.TIMESTAMP_WITH_TIMEZONE));
+        }
+
+        /* Detect TIME columns misreported as VARCHAR (e.g., SQLite JDBC) */
+        for (int columnIndex = 1; columnIndex <= resultSet.getMetaData().getColumnCount(); columnIndex++) {
+            int columnType = resultSet.getMetaData().getColumnType(columnIndex);
+            String columnTypeName = resultSet.getMetaData().getColumnTypeName(columnIndex);
+            if (columnType == Types.VARCHAR && "TIME".equalsIgnoreCase(columnTypeName)) {
+                explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.TIME));
+                logger.fine(String.format("Detected column %1s (%2s) as TIME (was reported as VARCHAR)",
+                        columnIndex, resultSet.getMetaData().getColumnName(columnIndex)));
             }
         }
 
@@ -103,7 +129,7 @@ public class ExplicitTypeMapper {
             String columnName = resultSet.getMetaData().getColumnName(columnIndex);
             JdbcFieldInfo decimalFieldInfo = createDefaultDecimalFieldInfo(precision, scale);
             explicitMapping.put(columnIndex, decimalFieldInfo);
-            logger.info(String.format("Detected column %1s (%2s) as a Decimal: (%3s, %4s) -> (%5s, %6s)",
+            logger.fine(String.format("Detected column %1s (%2s) as a Decimal: (%3s, %4s) -> (%5s, %6s)",
                     columnIndex, columnName, precision, scale,
                     decimalFieldInfo.getPrecision(), decimalFieldInfo.getScale()
                     )
