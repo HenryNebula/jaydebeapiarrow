@@ -34,10 +34,7 @@ download com.oracle.database.jdbc  ojdbc11      23.5.0.24.07
 download com.microsoft.sqlserver   mssql-jdbc   12.6.1.jre11
 download com.ibm.db2               jcc          11.5.9.0
 download io.trino                  trino-jdbc   461
-
-echo ""
-echo "Downloading Apache Drill JDBC driver..."
-bash "$SCRIPT_DIR/../ci/download_drill_jdbc.sh" "$DEST_DIR"
+download org.apache.drill.exec     drill-jdbc-all  1.21.0
 
 echo ""
 echo "All drivers downloaded."
