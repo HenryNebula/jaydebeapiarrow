@@ -118,6 +118,46 @@ In theory *every database with a suitable JDBC driver should work*. It is confir
 *   PostgreSQL
 *   ...and many more.
 
+## Testing
+
+Integration tests are located in `test/`. The test suite covers SQLite (in-memory), PostgreSQL, MySQL, and HSQLDB.
+
+### Build JARs and download drivers
+
+```bash
+bash test/build.sh                 # Build arrow-jdbc-extension and MockDriver JARs
+bash test/download_jdbc_drivers.sh # Download PostgreSQL, MySQL, SQLite, HSQLDB JDBC drivers
+```
+
+### Run tests
+
+```bash
+source .venv/bin/activate
+CLASSPATH="test/jars/*" python -m unittest discover -s test -v
+```
+
+### External database tests
+
+PostgreSQL and MySQL tests require running database instances. Docker Compose configs and helper scripts are provided in `test/`:
+
+```bash
+# Start both databases
+bash test/start.sh
+
+# Check status
+bash test/status.sh
+
+# Stop databases
+bash test/stop.sh
+```
+
+Database connection defaults (overridable via environment variables):
+
+| Database | Host | Port | DB | User | Password | Env prefix |
+|---|---|---|---|---|---|---|
+| PostgreSQL | localhost | 5432 | test_db | user | password | `JY_PG_*` |
+| MySQL | localhost | 3306 | test_db | user | password | `JY_MYSQL_*` |
+
 ## Benchmarks
 
 This approach was inspired by [Uwe Korn's work on pyarrow.jvm](https://uwekorn.com/2019/11/17/fast-jdbc-access-in-python-using-pyarrow-jvm.html) (Apache Drill) and [Razvi Noorul's Trino benchmarks](https://medium.com/@noorulrazvi/trino-jdbc-access-in-python-using-pyarrow-jvm-d1b75fe039ee), both demonstrating 100x+ speedups by using Arrow to bypass JPype's row-by-row serialization.
