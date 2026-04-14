@@ -18,9 +18,17 @@ def fetch_next_batch(it):
     Fetches the next batch from the ArrowVectorIterator 'it'.
     Returns a list of rows (tuples).
     Returns empty list if iterator is exhausted.
+
+    Some JDBC drivers (e.g. DB2) close the ResultSet after all rows are
+    consumed, causing ArrowVectorIterator.next() to throw a NullPointerException
+    even after hasNext() returned True. We catch that and treat it as
+    end-of-results.
     """
     if it.hasNext():
-        root = it.next()
+        try:
+            root = it.next()
+        except Exception:
+            return []
         try:
             batch = pa.jvm.record_batch(root).to_pylist()
             rows = [tuple(r.values()) for r in batch]
@@ -38,6 +46,8 @@ def read_rows_from_arrow_iterator(it, nrows=-1):
 
     try:
         for root in it:
+            if root is None:
+                break
             batch = pa.jvm.record_batch(root).to_pylist()
             _rows = [tuple(r.values()) for r in batch]
             if nrows_remaining > 0:

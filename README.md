@@ -30,10 +30,10 @@ pip install JayDeBeApiArrow
 Or you can get a copy of the source by cloning from the [JayDeBeApiArrow github project](https://github.com/HenryNebula/jaydebeapiArrow) and install with:
 
 ```bash
-python setup.py install
+uv sync
 ```
 
-Ensure that you have installed [JPype](https://pypi.python.org/pypi/JPype1/) properly.
+Ensure that you have installed [JPype](https://pypi.python.org/pypi/JPype1/) properly (it will be installed automatically by `uv sync`).
 
 ## Usage
 
@@ -117,6 +117,47 @@ In theory *every database with a suitable JDBC driver should work*. It is confir
 *   MySQL
 *   PostgreSQL
 *   ...and many more.
+
+## Testing
+
+Integration tests are located in `test/`. The test suite covers SQLite (in-memory), PostgreSQL, MySQL, and HSQLDB.
+
+### Build JARs and download drivers
+
+```bash
+uv run bash test/build.sh                 # Build arrow-jdbc-extension and MockDriver JARs
+uv run bash test/download_jdbc_drivers.sh # Download PostgreSQL, MySQL, SQLite, HSQLDB JDBC drivers
+```
+
+### Run tests
+
+```bash
+CLASSPATH="test/jars/*" uv run python -m unittest test.test_integration.HsqldbTest   # HSQLDB
+CLASSPATH="test/jars/*" uv run python -m unittest test.test_integration.SqliteXerialTest  # SQLite
+CLASSPATH="test/jars/*" uv run python -m unittest test.test_mock                       # Mock driver
+```
+
+### External database tests
+
+PostgreSQL and MySQL tests require running database instances. Docker Compose configs and helper scripts are provided in `test/`:
+
+```bash
+# Start both databases
+bash test/start.sh
+
+# Check status
+bash test/status.sh
+
+# Stop databases
+bash test/stop.sh
+```
+
+Database connection defaults (overridable via environment variables):
+
+| Database | Host | Port | DB | User | Password | Env prefix |
+|---|---|---|---|---|---|---|
+| PostgreSQL | localhost | 5432 | test_db | user | password | `JY_PG_*` |
+| MySQL | localhost | 3306 | test_db | user | password | `JY_MYSQL_*` |
 
 ## Benchmarks
 

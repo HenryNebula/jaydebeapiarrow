@@ -17,7 +17,7 @@ jobs:
       checks: write
     strategy:
       matrix:
-        python-version: [3.9, 3.11]
+        python-version: [3.9, 3.14]
         plattform: ["Python"]
 
     services:
@@ -46,20 +46,36 @@ jobs:
         options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
+    - name: Set up JDK
+      uses: actions/setup-java@v5
+      with:
+        java-version: '11'
+        distribution: 'temurin'
     - name: Maven cache
-      uses: actions/cache@v3
+      uses: actions/cache@v5
       with:
         path: .tox/shared/.m2
         key: ${{ matrix.plattform }}-${{ matrix.python-version }}-maven-${{ hashFiles('**/pom.xml') }}
         restore-keys: |
           ${{ matrix.plattform }}-${{ matrix.python-version }}-maven-
+    - name: JARs cache
+      uses: actions/cache@v5
+      with:
+        path: |
+          jaydebeapiarrow/lib/
+          test/jars/
+          arrow-jdbc-extension/target/
+          mockdriver/target/
+        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-jars-
     - name: Pip cache
-      uses: actions/cache@v3
+      uses: actions/cache@v5
       with:
         path: ~/.cache/pip
         key: ${{ matrix.plattform }}-${{ matrix.python-version }}-pip-${{ hashFiles('**/*requirements.txt', 'tox.ini', 'setup.py') }}
@@ -73,7 +89,7 @@ jobs:
     - name: Test with tox for non Jython only
       run: tox
     - name: Publish Test Report
-      uses: mikepenz/action-junit-report@v4
+      uses: mikepenz/action-junit-report@v6
       if: always() # always run even if tests fail
       with:
         report_paths: '**/build/test-reports/*.xml'
@@ -94,3 +110,321 @@ jobs:
 #      uses: baztian/coveralls-python-action@new-merged-changes
 #      with:
 #        parallel-finished: true
+
+  test-oracle:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+
+    services:
+      oracle:
+        image: gvenzl/oracle-xe:21-slim
+        env:
+          ORACLE_PASSWORD: Password123!
+        ports:
+          - 1521:1521
+        options: >-
+          --health-cmd "echo 'SELECT 1 FROM DUAL;' | sqlplus -S system/Password123!@localhost/XEPDB1"
+          --health-interval 15s
+          --health-timeout 10s
+          --health-retries 30
+          --health-start-period 120s
+
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.14'
+    - name: Set up JDK
+      uses: actions/setup-java@v5
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+    - name: JARs cache
+      uses: actions/cache@v5
+      with:
+        path: |
+          jaydebeapiarrow/lib/
+          test/jars/
+          arrow-jdbc-extension/target/
+          mockdriver/target/
+        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-jars-
+    - name: Pip cache
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-py3.14-pip-${{ hashFiles('**/*requirements.txt', 'tox.ini', 'setup.py') }}
+        restore-keys: |
+          ${{ runner.os }}-py3.14-pip-
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install tox tox-gh-actions
+    - name: Test with tox
+      run: tox -e py314-driver-oracle
+      env:
+        JY_ORACLE_HOST: localhost
+        JY_ORACLE_PORT: "1521"
+        JY_ORACLE_USER: system
+        JY_ORACLE_PASSWORD: Password123!
+
+  test-mssql:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: "Password123!"
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Password123!' -C -Q 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 30s
+
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.14'
+    - name: Set up JDK
+      uses: actions/setup-java@v5
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+    - name: JARs cache
+      uses: actions/cache@v5
+      with:
+        path: |
+          jaydebeapiarrow/lib/
+          test/jars/
+          arrow-jdbc-extension/target/
+          mockdriver/target/
+        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-jars-
+    - name: Pip cache
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-py3.14-pip-${{ hashFiles('**/*requirements.txt', 'tox.ini', 'setup.py') }}
+        restore-keys: |
+          ${{ runner.os }}-py3.14-pip-
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install tox tox-gh-actions
+    - name: Test with tox
+      run: tox -e py314-driver-mssql
+      env:
+        JY_MSSQL_HOST: localhost
+        JY_MSSQL_PORT: "1433"
+        JY_MSSQL_USER: sa
+        JY_MSSQL_PASSWORD: "Password123!"
+
+  test-trino:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+
+    services:
+      trino:
+        image: trinodb/trino:461
+        ports:
+          - 8080:8080
+        env:
+          CATALOG_MANAGEMENT: dynamic
+        options: >-
+          --name trino
+          --health-cmd "curl -sf http://localhost:8080/v1/info"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 30s
+
+    steps:
+    - uses: actions/checkout@v6
+    - name: Create memory catalog in Trino
+      run: docker exec trino trino --execute 'CREATE CATALOG memory USING memory;' || echo "Catalog may already exist"
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.14'
+    - name: Set up JDK
+      uses: actions/setup-java@v5
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+    - name: JARs cache
+      uses: actions/cache@v5
+      with:
+        path: |
+          jaydebeapiarrow/lib/
+          test/jars/
+          arrow-jdbc-extension/target/
+          mockdriver/target/
+        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-jars-
+    - name: Pip cache
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-py3.14-pip-${{ hashFiles('**/*requirements.txt', 'tox.ini', 'setup.py') }}
+        restore-keys: |
+          ${{ runner.os }}-py3.14-pip-
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install tox tox-gh-actions
+    - name: Test with tox
+      run: tox -e py314-driver-trino
+      env:
+        JY_TRINO_HOST: localhost
+        JY_TRINO_PORT: "8080"
+        JY_TRINO_USER: test
+
+  test-db2:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      matrix:
+        python-version: [3.14]
+
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Set up JDK
+      uses: actions/setup-java@v5
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+    - name: JARs cache
+      uses: actions/cache@v5
+      with:
+        path: |
+          jaydebeapiarrow/lib/
+          test/jars/
+          arrow-jdbc-extension/target/
+          mockdriver/target/
+        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-jars-
+    - name: Start DB2 container
+      run: |
+        docker run -d --name db2 --privileged \
+          -p 50000:50000 \
+          -e LICENSE=accept \
+          -e DB2INST1_PASSWORD=Password123! \
+          -e DBNAME=test_db \
+          ibmcom/db2:11.5.8.0
+        echo "Waiting for DB2 to be ready (this may take 5+ minutes)..."
+        for i in $(seq 1 60); do
+          if docker exec db2 su - db2inst1 -c "db2 connect to test_db" >/dev/null 2>&1; then
+            echo "DB2 is ready!"
+            break
+          fi
+          echo "  Waiting... ($i/60)"
+          sleep 10
+        done
+    - name: Pip cache
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-py${{ matrix.python-version }}-pip-${{ hashFiles('**/*requirements.txt', 'tox.ini', 'setup.py') }}
+        restore-keys: |
+          ${{ runner.os }}-py${{ matrix.python-version }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install tox tox-gh-actions
+    - name: Test with tox
+      run: tox -e py314-driver-db2
+      env:
+        JY_DB2_HOST: localhost
+        JY_DB2_PORT: "50000"
+        JY_DB2_USER: db2inst1
+        JY_DB2_PASSWORD: "Password123!"
+
+  test-drill:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      matrix:
+        python-version: [3.14]
+
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Set up JDK
+      uses: actions/setup-java@v5
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+    - name: JARs cache
+      uses: actions/cache@v5
+      with:
+        path: |
+          jaydebeapiarrow/lib/
+          test/jars/
+          arrow-jdbc-extension/target/
+          mockdriver/target/
+        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-jars-
+    - name: Start Drill container
+      run: |
+        docker run -d --name drill \
+          -p 31010:31010 \
+          -p 8047:8047 \
+          apache/drill:1.21.0
+        echo "Waiting for Drill to be ready..."
+        for i in $(seq 1 30); do
+          if curl -sf http://localhost:8047/stats.json >/dev/null 2>&1; then
+            echo "Drill is ready!"
+            break
+          fi
+          echo "  Waiting... ($i/30)"
+          sleep 5
+        done
+    - name: Pip cache
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-py${{ matrix.python-version }}-pip-${{ hashFiles('**/*requirements.txt', 'tox.ini', 'setup.py') }}
+        restore-keys: |
+          ${{ runner.os }}-py${{ matrix.python-version }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install tox tox-gh-actions
+    - name: Test with tox
+      run: tox -e py314-driver-drill
+      env:
+        JY_DRILL_HOST: localhost
+        JY_DRILL_PORT: "31010"

@@ -30,9 +30,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 
 /**
- * Consumer which consume timestamp type values from {@link ResultSet}.
- * Write the data to {@link TimeStampMicroTZVector}.
- * TODO: Add TIMEZONE support
+ * Consumer which consumes timestamp type values from {@link ResultSet}.
+ * Writes the data to {@link TimeStampMicroTZVector}.
+ *
+ * Timezone handling: All timestamps from JDBC are normalized to UTC using the
+ * provided Calendar. The Arrow vector type is timestamp[us, tz=UTC], which
+ * correctly represents UTC-normalized timestamps. On the Python side, pyarrow
+ * converts these to datetime.datetime with tzinfo=datetime.timezone.utc,
+ * matching the behavior of psycopg2 and cx_Oracle for TIMESTAMPTZ columns.
  */
 public abstract class TimestampTZConsumer {
 

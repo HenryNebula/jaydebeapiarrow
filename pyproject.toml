@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "JayDeBeApiArrow"
+version = "2.0.0"
+description = "Use JDBC database drivers from Python 3 with a DB-API, accelerated with Apache Arrow."
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "LGPL-3.0-or-later"}
+authors = [
+    {name = "HenryNebula", email = "henrynebula0710@gmail.com"}
+]
+keywords = ["db", "api", "java", "jdbc", "bridge", "connect", "sql", "jpype", "apache-arrow"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU Library or Lesser General Public License (LGPL)",
+    "Programming Language :: Java",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries :: Java Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "JPype1>=1.0.0",
+    "pyarrow>=16.0.0",
+    "numpy",
+    "cffi",
+]
+
+[project.urls]
+Homepage = "https://github.com/HenryNebula/jaydebeapiarrow"
+
+[dependency-groups]
+dev = [
+    "coverage>=4.5",
+    "unittest-xml-reporting",
+]
+
+[tool.setuptools]
+packages = ["jaydebeapiarrow", "jaydebeapiarrow.lib"]
+include-package-data = true

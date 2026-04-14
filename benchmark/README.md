@@ -89,7 +89,7 @@ If you prefer to run benchmarks manually:
 
 ```bash
 # 1. Download JDBC driver (if not already present)
-bash benchmark/download_driver.sh
+bash test/download_jdbc_drivers.sh
 
 # 2. Run variable rows benchmark (default)
 python benchmark/compare_performance.py
@@ -139,7 +139,7 @@ Dataset      | Method               | Time (s)   | Speedup
 - **`run_benchmark.sh`** - Automated setup and execution script
 - **`compare_performance.py`** - Main benchmark coordinator and worker
 - **`prepare_data.py`** - Test data generation utility
-- **`download_driver.sh`** - Downloads PostgreSQL JDBC driver (v42.7.2)
+- **`download_jdbc_drivers.sh`** - Downloads JDBC drivers (in `test/`)
 
 ## Configuration
 

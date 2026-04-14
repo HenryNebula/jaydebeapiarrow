@@ -12,6 +12,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+/**
+ * Utility class for parsing temporal values from JDBC ResultSets into Arrow-compatible
+ * microsecond/millisecond representations.
+ *
+ * Timezone strategy: All timestamps are normalized to UTC. For timezone-aware
+ * columns (TIMESTAMP_WITH_TIMEZONE), the JDBC driver performs TZ conversion when
+ * getTimestamp(column, calendar) is called with a UTC Calendar. For timezone-naive
+ * columns (TIMESTAMP), the raw local time is interpreted as-is.
+ */
 public class TimeUtils {
 
     private static final Logger logger = Logger.getLogger(ExplicitTypeMapper.class.getName());

@@ -25,6 +25,7 @@ __version_info__ = (2, 0, 0)
 __version__ = ".".join(str(i) for i in __version_info__)
 
 import datetime
+from decimal import Decimal
 import glob
 import os
 import time
@@ -38,6 +39,33 @@ from jaydebeapiarrow.lib.arrow_utils import \
     create_pyarrow_batches_from_list, \
     add_pyarrow_batches_to_statement, \
     fetch_next_batch
+
+
+def set_debug(enabled=True):
+    """Enable or disable debug logging from the Java bridge (JUL FINE level).
+
+    This controls java.util.logging for the org.jaydebeapiarrow.extension
+    package. By default only INFO and above is printed; calling
+    ``set_debug(True)`` enables column mapping, parameter binding, and
+    other diagnostic messages.
+
+    Must be called *after* the JVM has been started (i.e. after
+    ``connect()``). Calling before the JVM starts is a no-op.
+
+    Args:
+        enabled: True to enable debug logging, False to disable.
+    """
+    import jpype
+    if not jpype.isJVMStarted():
+        return
+    Level = jpype.JClass("java.util.logging.Level")
+    target_level = Level.FINE if enabled else Level.INFO
+    logger = jpype.JClass("java.util.logging.Logger").getLogger(
+        "org.jaydebeapiarrow.extension"
+    )
+    logger.setLevel(target_level)
+    for handler in jpype.JClass("java.util.logging.Logger").getLogger("").getHandlers():
+        handler.setLevel(target_level)
 
 
 def reraise(tp, value, tb=None):
@@ -497,8 +525,40 @@ class Cursor(object):
     def _set_stmt_parms(self, statement, parameters, is_batch=False):
         if self._connection._stringify_dates:
              parameters = self._stringify_params(parameters, is_batch)
-        batches = create_pyarrow_batches_from_list(parameters)
-        add_pyarrow_batches_to_statement(batches, statement, is_batch=is_batch)
+        try:
+            batches = create_pyarrow_batches_from_list(parameters)
+            add_pyarrow_batches_to_statement(batches, statement, is_batch=is_batch)
+        except Exception:
+            self._set_stmt_parms_fallback(statement, parameters, is_batch)
+
+    def _set_stmt_parms_fallback(self, statement, parameters, is_batch=False):
+        """Fallback using standard JDBC setObject() for drivers that don't
+        support Arrow-stream parameter binding (e.g. Trino)."""
+        import jpype
+
+        def _to_java(p):
+            """Convert Python types to Java SQL types for setObject()."""
+            if isinstance(p, bool):
+                return p
+            if isinstance(p, datetime.datetime):
+                return jpype.JClass("java.sql.Timestamp").valueOf(
+                    p.strftime("%Y-%m-%d %H:%M:%S"))
+            if isinstance(p, datetime.date):
+                return jpype.JClass("java.sql.Date").valueOf(p.isoformat())
+            if isinstance(p, datetime.time):
+                return jpype.JClass("java.sql.Time").valueOf(p.isoformat())
+            if isinstance(p, Decimal):
+                return jpype.JClass("java.math.BigDecimal")(str(p))
+            return p
+
+        if is_batch:
+            for row in parameters:
+                for i, p in enumerate(row):
+                    statement.setObject(i + 1, _to_java(p))
+                statement.addBatch()
+        else:
+            for i, p in enumerate(parameters):
+                statement.setObject(i + 1, _to_java(p))
 
     def execute(self, operation, parameters=None):
         if self._connection._closed:

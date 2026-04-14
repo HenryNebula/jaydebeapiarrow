@@ -1,0 +1,120 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: jaydebeapi-benchmark-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  mysql:
+    image: mysql:8.0
+    container_name: jaydebeapi-benchmark-mysql
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    ports:
+      - "${MYSQL_PORT}:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "${MYSQL_USER}", "-p${MYSQL_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  oracle:
+    image: gvenzl/oracle-xe:21-slim
+    container_name: jaydebeapi-test-oracle
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD}
+    ports:
+      - "${ORACLE_PORT}:1521"
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'SELECT 1 FROM DUAL;' | sqlplus -S system/${ORACLE_PASSWORD}@localhost/XEPDB1"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+    volumes:
+      - oracle_data:/opt/oracle/oradata
+
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: jaydebeapi-test-mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD}"
+    ports:
+      - "${MSSQL_PORT}:1433"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '${MSSQL_SA_PASSWORD}' -C -Q 'SELECT 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  db2:
+    image: ibmcom/db2:11.5.8.0
+    container_name: jaydebeapi-test-db2
+    privileged: true
+    environment:
+      LICENSE: accept
+      DB2INST1_PASSWORD: "${DB2_PASSWORD}"
+      DBNAME: ${DB2_DBNAME}
+    ports:
+      - "${DB2_PORT}:50000"
+    healthcheck:
+      test: ["CMD-SHELL", "su - db2inst1 -c 'db2 connect to ${DB2_DBNAME}'"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 300s
+    volumes:
+      - db2_data:/database
+
+  drill:
+    image: apache/drill:1.21.0
+    container_name: jaydebeapi-test-drill
+    tty: true
+    stdin_open: true
+    ports:
+      - "${DRILL_PORT}:31010"
+      - "${DRILL_WEB_PORT}:8047"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8047/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+
+  trino:
+    image: trinodb/trino:461
+    container_name: jaydebeapi-test-trino
+    ports:
+      - "${TRINO_PORT}:8080"
+    environment:
+      CATALOG_MANAGEMENT: dynamic
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/v1/info || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  postgres_data:
+  mysql_data:
+  oracle_data:
+  db2_data:
