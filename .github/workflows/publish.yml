@@ -30,6 +30,11 @@ jobs:
           ${{ runner.os }}-jars-
     - name: Build with Maven
       run: bash test/build.sh
+    - name: Set version for TestPyPI
+      if: github.event_name == 'workflow_dispatch'
+      run: |
+        VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+        sed -i "s/version = \"$VERSION\"/version = \"$VERSION.dev${{ github.run_number }}\"/" pyproject.toml
     - name: Set up Python
       uses: actions/setup-python@v6
       with:
@@ -96,11 +101,12 @@ jobs:
     - name: Install from TestPyPI
       run: pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ JayDeBeApiArrow
     - name: Run mock tests
-      run: CLASSPATH="test/jars/*" python -m unittest test.test_mock
+      run: CLASSPATH="test/jars/*" python test/testsuite.py test_mock
 
   publish-to-pypi:
     name: Publish to PyPI
     needs: verify-testpypi
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
 
     environment:
