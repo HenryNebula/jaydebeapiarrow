@@ -30,15 +30,15 @@ jobs:
           ${{ runner.os }}-jars-
     - name: Build with Maven
       run: bash test/build.sh
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.x'
     - name: Set version for TestPyPI
       if: github.event_name == 'workflow_dispatch'
       run: |
         VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
         sed -i "s/version = \"$VERSION\"/version = \"$VERSION.dev${{ github.run_number }}\"/" pyproject.toml
-    - name: Set up Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: '3.x'
     - name: Install build tools
       run: pip install build
     - name: Build wheel and tarball
