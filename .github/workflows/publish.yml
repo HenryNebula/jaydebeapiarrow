@@ -101,7 +101,7 @@ jobs:
     - name: Install from TestPyPI
       run: pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ JayDeBeApiArrow
     - name: Run mock tests
-      run: CLASSPATH="test/jars/*" python -m unittest test.test_mock
+      run: CLASSPATH="test/jars/*" python test/testsuite.py test_mock
 
   publish-to-pypi:
     name: Publish to PyPI

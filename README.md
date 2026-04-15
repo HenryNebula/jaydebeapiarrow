@@ -1,6 +1,6 @@
 # JayDeBeApiArrow - High-Performance JDBC to Python DB-API Bridge
 
-[![Test Status]()]()
+[![Test Status](https://github.com/HenryNebula/jaydebeapiarrow/actions/workflows/tests.yml/badge.svg)](https://github.com/HenryNebula/jaydebeapiarrow/actions/workflows/tests.yml)
 [![PyPI version](https://img.shields.io/pypi/v/JayDeBeApiArrow.svg)](https://pypi.python.org/pypi/JayDeBeApiArrow/)
 
 The **JayDeBeApiArrow** module allows you to connect from Python code to databases using Java [JDBC](http://java.sun.com/products/jdbc/overview.html). It provides a Python [DB-API v2.0](http://www.python.org/dev/peps/pep-0249/) to that database.
