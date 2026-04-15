@@ -21,8 +21,10 @@
 # 1. Remove py2 & Jython support
 # 2. Enforce typing for Decimal and temporal types
 
-__version_info__ = (2, 0, 0)
-__version__ = ".".join(str(i) for i in __version_info__)
+import importlib.metadata
+
+__version__ = importlib.metadata.version("JayDeBeApiArrow")
+__version_info__ = tuple(int(x) for x in __version__.split("."))
 
 import datetime
 from decimal import Decimal
