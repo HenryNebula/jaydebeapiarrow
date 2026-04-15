@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "JayDeBeApiArrow"
-version = "2.0.0"
+version = "2.1.0"
 description = "Use JDBC database drivers from Python 3 with a DB-API, accelerated with Apache Arrow."
 readme = "README.md"
 requires-python = ">=3.9"
