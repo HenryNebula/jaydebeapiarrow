@@ -67,9 +67,40 @@ jobs:
       with:
         repository-url: https://test.pypi.org/legacy/
 
+  verify-testpypi:
+    name: Verify TestPyPI package
+    needs: publish-to-testpypi
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up JDK
+      uses: actions/setup-java@v5
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+        cache: maven
+    - name: Cache built JARs
+      uses: actions/cache@v5
+      with:
+        path: |
+          jaydebeapiarrow/lib/
+          test/jars/
+          arrow-jdbc-extension/target/
+          mockdriver/target/
+        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-jars-
+    - name: Build with Maven
+      run: bash test/build.sh
+    - name: Install from TestPyPI
+      run: pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ JayDeBeApiArrow
+    - name: Run mock tests
+      run: CLASSPATH="test/jars/*" python -m unittest test.test_mock
+
   publish-to-pypi:
     name: Publish to PyPI
-    needs: build
+    needs: verify-testpypi
     runs-on: ubuntu-latest
 
     environment:
