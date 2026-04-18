@@ -96,6 +96,78 @@ public abstract class MockConnection implements Connection {
     Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
   }
 
+  public final void mockNullDecimalResult(int precision, int scale) throws SQLException {
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for null Decimal)");
+    Mockito.when(mockPreparedStatement.getResultSet()).thenReturn(mockResultSet);
+    Mockito.when(mockResultSet.next()).thenReturn(true);
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    mockGeneralResultSetMetaData(mockMetaData, Types.DECIMAL);
+    Mockito.when(mockMetaData.getPrecision(1)).thenReturn(precision);
+    Mockito.when(mockMetaData.getScale(1)).thenReturn(scale);
+    Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
+
+    Mockito.when(mockResultSet.getObject(1)).thenReturn(null);
+    Mockito.when(mockResultSet.wasNull()).thenReturn(true);
+    Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
+
+  public final void mockHighPrecisionDecimalResult(BigDecimal value, int precision, int scale) throws SQLException {
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for high-precision Decimal)");
+    Mockito.when(mockPreparedStatement.getResultSet()).thenReturn(mockResultSet);
+    Mockito.when(mockResultSet.next()).thenReturn(true);
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    mockGeneralResultSetMetaData(mockMetaData, Types.DECIMAL);
+    Mockito.when(mockMetaData.getPrecision(1)).thenReturn(precision);
+    Mockito.when(mockMetaData.getScale(1)).thenReturn(scale);
+    Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
+
+    Mockito.when(mockResultSet.getObject(1)).thenReturn(value);
+    Mockito.when(mockResultSet.wasNull()).thenReturn(false);
+    Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
+
+  public final void mockIntegerDecimalResult(long value, int precision, int scale) throws SQLException {
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for Integer-as-Decimal)");
+    Mockito.when(mockPreparedStatement.getResultSet()).thenReturn(mockResultSet);
+    Mockito.when(mockResultSet.next()).thenReturn(true);
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    mockGeneralResultSetMetaData(mockMetaData, Types.DECIMAL);
+    Mockito.when(mockMetaData.getPrecision(1)).thenReturn(precision);
+    Mockito.when(mockMetaData.getScale(1)).thenReturn(scale);
+    Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
+
+    // Real drivers return BigDecimal even for integer-like values (e.g., Oracle NUMBER(10)).
+    // The value has scale 0; OverriddenConsumer may inflate the vector scale,
+    // causing precision overflow when setScale pads trailing zeros.
+    BigDecimal bdValue = BigDecimal.valueOf(value);
+    Mockito.when(mockResultSet.getObject(1)).thenReturn(bdValue);
+    Mockito.when(mockResultSet.wasNull()).thenReturn(false);
+    Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
+
+  public final void mockNumericTypeResult(BigDecimal value, int precision, int scale) throws SQLException {
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for NUMERIC type)");
+    Mockito.when(mockPreparedStatement.getResultSet()).thenReturn(mockResultSet);
+    Mockito.when(mockResultSet.next()).thenReturn(true);
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    mockGeneralResultSetMetaData(mockMetaData, Types.NUMERIC);
+    Mockito.when(mockMetaData.getPrecision(1)).thenReturn(precision);
+    Mockito.when(mockMetaData.getScale(1)).thenReturn(scale);
+    Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
+
+    Mockito.when(mockResultSet.getObject(1)).thenReturn(value);
+    Mockito.when(mockResultSet.wasNull()).thenReturn(false);
+    Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
+
   public final void mockDoubleDecimalResult(double value) throws SQLException {
     PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
     Mockito.when(mockPreparedStatement.execute()).thenReturn(true);

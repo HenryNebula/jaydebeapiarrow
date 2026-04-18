@@ -90,6 +90,50 @@ class MockTest(unittest.TestCase):
             result = cursor.fetchone()
         self.assertEqual(result[0], Decimal("1234.5"))
 
+    def test_decimal_null_value(self):
+        """SQL NULL in a DECIMAL column should return None, not crash or return 0."""
+        self.conn.jconn.mockNullDecimalResult(10, 2)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertIsNone(result[0])
+
+    def test_decimal_high_precision_overflow(self):
+        """BigDecimal with scale > vector scale is safely rounded with HALF_UP
+        when the data exceeds the vector's configured scale."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        # Value has scale 20, but vector is configured with scale 2.
+        # HALF_UP rounds to 2 decimal places.
+        value = BigDecimal("123456789012345678.12345678901234567890")
+        self.conn.jconn.mockHighPrecisionDecimalResult(value, 38, 2)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("123456789012345678.12"))
+
+    def test_decimal_integer_from_getObject(self):
+        """Drivers like Oracle return BigDecimal with scale 0 for integer-like
+        NUMERIC columns (e.g., NUMBER(10)). The vector now preserves the
+        metadata's scale instead of inflating it, so the value round-trips
+        without precision overflow."""
+        self.conn.jconn.mockIntegerDecimalResult(42, 10, 0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("42"))
+
+    def test_numeric_type_mapping(self):
+        """Types.NUMERIC should follow the same DECIMAL code path in
+        ExplicitTypeMapper and DecimalConsumer."""
+        import jpype
+        self.conn.jconn.mockNumericTypeResult(
+            jpype.JClass("java.math.BigDecimal")("99.99"), 10, 2)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("99.99"))
+
     def test_sql_exception_on_execute(self):
         self.conn.jconn.mockExceptionOnExecute("java.sql.SQLException", "expected")
         with self.conn.cursor() as cursor:
