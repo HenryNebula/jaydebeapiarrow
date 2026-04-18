@@ -27,8 +27,13 @@ def fetch_next_batch(it):
     if it.hasNext():
         try:
             root = it.next()
-        except Exception:
-            return []
+        except Exception as e:
+            if _is_java_null_pointer_exception(e):
+                return []
+            decimal_message = _find_decimal_conversion_message(e)
+            if decimal_message:
+                raise RuntimeError(decimal_message) from e
+            raise
         try:
             batch = pa.jvm.record_batch(root).to_pylist()
             rows = [tuple(r.values()) for r in batch]
@@ -36,6 +41,27 @@ def fetch_next_batch(it):
         finally:
             root.clear()
     return []
+
+
+def _is_java_null_pointer_exception(exc):
+    try:
+        return exc.getClass().getName() == "java.lang.NullPointerException"
+    except AttributeError:
+        return False
+
+
+def _find_decimal_conversion_message(exc):
+    current = exc
+    while current is not None:
+        message = str(current)
+        marker = "Could not convert DECIMAL/NUMERIC value"
+        if marker in message:
+            return message[message.find(marker):]
+        try:
+            current = current.getCause()
+        except AttributeError:
+            return None
+    return None
 
 
 def read_rows_from_arrow_iterator(it, nrows=-1):

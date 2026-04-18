@@ -112,6 +112,40 @@ class MockTest(unittest.TestCase):
             result = cursor.fetchone()
         self.assertEqual(result[0], Decimal("123456789012345678.12"))
 
+    def test_decimal_true_precision_overflow_has_actionable_error(self):
+        """Values that cannot fit Arrow DECIMAL precision should fail loudly
+        instead of being returned as NULL."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        value = BigDecimal("123456789012345678901234567890123456789")
+        self.conn.jconn.mockHighPrecisionDecimalResult(value, 38, 0)
+
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            with self.assertRaises(Exception) as cm:
+                cursor.fetchone()
+
+        message = str(cm.exception)
+        self.assertIn("Could not convert DECIMAL/NUMERIC value", message)
+        self.assertIn("Arrow DECIMAL(38, 0)", message)
+        self.assertIn("Cast the column in SQL", message)
+        self.assertIn("CAST(column AS DECIMAL(38, 0))", message)
+        self.assertIn("cast it to VARCHAR", message)
+
+    def test_decimal_cast_shaped_value_can_be_consumed(self):
+        """After SQL casts constrain precision and scale to an Arrow-compatible
+        shape, values should be consumed as Decimal."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        value = BigDecimal("123456789012345678901234567890123456.79")
+        self.conn.jconn.mockHighPrecisionDecimalResult(value, 38, 2)
+
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+
+        self.assertEqual(result[0], Decimal("123456789012345678901234567890123456.79"))
+
     def test_decimal_integer_from_getObject(self):
         """Drivers like Oracle return BigDecimal with scale 0 for integer-like
         NUMERIC columns (e.g., NUMBER(10)). The vector now preserves the

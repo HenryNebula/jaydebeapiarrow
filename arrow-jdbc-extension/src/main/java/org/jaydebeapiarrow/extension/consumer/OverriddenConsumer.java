@@ -84,11 +84,14 @@ public class OverriddenConsumer {
                     return TimestampTZConsumer.createConsumer((TimeStampMicroTZVector) vector, columnIndex, nullable, calendar);
                 }
             case Decimal:
+                ArrowType.Decimal decimalType = (ArrowType.Decimal) arrowType;
                 return DecimalConsumer.createConsumer(
                         (DecimalVector) vector, columnIndex, nullable,
                         config.getBigDecimalRoundingMode() != null
                                 ? config.getBigDecimalRoundingMode()
-                                : RoundingMode.HALF_UP);
+                                : RoundingMode.HALF_UP,
+                        decimalType.getScale(),
+                        decimalType.getPrecision());
             default:
                 return JdbcToArrowUtils.getConsumer(arrowType, columnIndex, nullable, vector, config);
         }

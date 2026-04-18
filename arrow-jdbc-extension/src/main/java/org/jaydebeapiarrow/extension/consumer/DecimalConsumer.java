@@ -21,10 +21,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
-import org.apache.arrow.adapter.jdbc.consumer.BaseConsumer;
 import org.apache.arrow.adapter.jdbc.consumer.JdbcConsumer;
 import org.apache.arrow.vector.DecimalVector;
 
@@ -42,24 +39,35 @@ import org.apache.arrow.vector.DecimalVector;
  */
 public class DecimalConsumer {
 
-    private static final Logger logger = Logger.getLogger(DecimalConsumer.class.getName());
-
     public static JdbcConsumer<DecimalVector> createConsumer(
             DecimalVector vector, int index, boolean nullable, RoundingMode roundingMode) {
+        return createConsumer(vector, index, nullable, roundingMode, vector.getScale(), 38);
+    }
+
+    public static JdbcConsumer<DecimalVector> createConsumer(
+            DecimalVector vector, int index, boolean nullable, RoundingMode roundingMode, int scale, int precision) {
         if (nullable) {
-            return new NullableDecimalConsumer(vector, index, roundingMode);
+            return new NullableDecimalConsumer(vector, index, roundingMode, scale, precision);
         } else {
-            return new NonNullableDecimalConsumer(vector, index, roundingMode);
+            return new NonNullableDecimalConsumer(vector, index, roundingMode, scale, precision);
         }
     }
 
-    static class NullableDecimalConsumer extends BaseConsumer<DecimalVector> {
+    static class NullableDecimalConsumer implements JdbcConsumer<DecimalVector> {
 
         private final RoundingMode roundingMode;
+        private final int scale;
+        private final int precision;
+        private final int columnIndexInResultSet;
+        private DecimalVector vector;
+        private int currentIndex;
 
-        public NullableDecimalConsumer(DecimalVector vector, int index, RoundingMode roundingMode) {
-            super(vector, index);
+        public NullableDecimalConsumer(DecimalVector vector, int index, RoundingMode roundingMode, int scale, int precision) {
+            this.vector = vector;
+            this.columnIndexInResultSet = index;
             this.roundingMode = roundingMode;
+            this.scale = scale;
+            this.precision = precision;
         }
 
         @Override
@@ -67,39 +75,86 @@ public class DecimalConsumer {
             try {
                 BigDecimal bd = getCleanBigDecimal(resultSet, columnIndexInResultSet);
                 if (!resultSet.wasNull()) {
-                    bd = bd.setScale(vector.getScale(), roundingMode);
+                    bd = bd.setScale(scale, roundingMode);
+                    validateDecimalFitsVector(bd, precision);
                     vector.set(currentIndex, bd);
                 }
             } catch (ArithmeticException | IllegalArgumentException e) {
-                logger.fine(String.format(
-                    "Could not convert decimal value at row %d, column %d (vector scale=%d): %s",
-                    currentIndex, columnIndexInResultSet, vector.getScale(), e.getMessage()));
+                throw createDecimalConversionException(e, currentIndex, columnIndexInResultSet, precision, scale);
             }
             currentIndex++;
         }
+
+        @Override
+        public void resetValueVector(DecimalVector vector) {
+            this.vector = vector;
+            this.currentIndex = 0;
+        }
+
+        @Override
+        public void close() {
+        }
     }
 
-    static class NonNullableDecimalConsumer extends BaseConsumer<DecimalVector> {
+    static class NonNullableDecimalConsumer implements JdbcConsumer<DecimalVector> {
 
         private final RoundingMode roundingMode;
+        private final int scale;
+        private final int precision;
+        private final int columnIndexInResultSet;
+        private DecimalVector vector;
+        private int currentIndex;
 
-        public NonNullableDecimalConsumer(DecimalVector vector, int index, RoundingMode roundingMode) {
-            super(vector, index);
+        public NonNullableDecimalConsumer(DecimalVector vector, int index, RoundingMode roundingMode, int scale, int precision) {
+            this.vector = vector;
+            this.columnIndexInResultSet = index;
             this.roundingMode = roundingMode;
+            this.scale = scale;
+            this.precision = precision;
         }
 
         @Override
         public void consume(ResultSet resultSet) throws SQLException {
             try {
                 BigDecimal bd = getCleanBigDecimal(resultSet, columnIndexInResultSet);
-                bd = bd.setScale(vector.getScale(), roundingMode);
+                bd = bd.setScale(scale, roundingMode);
+                validateDecimalFitsVector(bd, precision);
                 vector.set(currentIndex, bd);
             } catch (ArithmeticException | IllegalArgumentException e) {
-                logger.fine(String.format(
-                    "Could not convert decimal value at row %d, column %d (vector scale=%d): %s",
-                    currentIndex, columnIndexInResultSet, vector.getScale(), e.getMessage()));
+                throw createDecimalConversionException(e, currentIndex, columnIndexInResultSet, precision, scale);
             }
             currentIndex++;
+        }
+
+        @Override
+        public void resetValueVector(DecimalVector vector) {
+            this.vector = vector;
+            this.currentIndex = 0;
+        }
+
+        @Override
+        public void close() {
+        }
+    }
+
+    private static SQLException createDecimalConversionException(
+            RuntimeException cause, int rowIndex, int columnIndex, int precision, int scale) {
+        return new SQLException(String.format(
+                "Could not convert DECIMAL/NUMERIC value at row %d, column %d to Arrow DECIMAL(%d, %d). " +
+                "The value may exceed Arrow decimal precision or require a different scale. " +
+                "Cast the column in SQL to a supported DECIMAL/NUMERIC precision and scale, " +
+                "for example CAST(column AS DECIMAL(38, %d)), or cast it to VARCHAR to preserve the exact value as text. " +
+                "Cause: %s",
+                rowIndex, columnIndex, precision, scale, scale,
+                cause.getMessage()),
+                cause);
+    }
+
+    private static void validateDecimalFitsVector(BigDecimal bd, int precision) {
+        if (bd.precision() > precision) {
+            throw new IllegalArgumentException(String.format(
+                    "value precision %d exceeds Arrow decimal precision %d",
+                    bd.precision(), precision));
         }
     }
 
