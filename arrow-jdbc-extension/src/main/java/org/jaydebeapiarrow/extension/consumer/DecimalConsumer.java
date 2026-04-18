@@ -21,6 +21,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import org.apache.arrow.adapter.jdbc.consumer.BaseConsumer;
 import org.apache.arrow.adapter.jdbc.consumer.JdbcConsumer;
@@ -39,6 +41,8 @@ import org.apache.arrow.vector.DecimalVector;
  * decimal representation before setting the scale to match the vector.
  */
 public class DecimalConsumer {
+
+    private static final Logger logger = Logger.getLogger(DecimalConsumer.class.getName());
 
     public static JdbcConsumer<DecimalVector> createConsumer(
             DecimalVector vector, int index, boolean nullable, RoundingMode roundingMode) {
@@ -60,10 +64,16 @@ public class DecimalConsumer {
 
         @Override
         public void consume(ResultSet resultSet) throws SQLException {
-            BigDecimal bd = getCleanBigDecimal(resultSet, columnIndexInResultSet);
-            if (!resultSet.wasNull()) {
-                bd = bd.setScale(vector.getScale(), roundingMode);
-                vector.set(currentIndex, bd);
+            try {
+                BigDecimal bd = getCleanBigDecimal(resultSet, columnIndexInResultSet);
+                if (!resultSet.wasNull()) {
+                    bd = bd.setScale(vector.getScale(), roundingMode);
+                    vector.set(currentIndex, bd);
+                }
+            } catch (ArithmeticException | IllegalArgumentException e) {
+                logger.fine(String.format(
+                    "Could not convert decimal value at row %d, column %d (vector scale=%d): %s",
+                    currentIndex, columnIndexInResultSet, vector.getScale(), e.getMessage()));
             }
             currentIndex++;
         }
@@ -80,9 +90,15 @@ public class DecimalConsumer {
 
         @Override
         public void consume(ResultSet resultSet) throws SQLException {
-            BigDecimal bd = getCleanBigDecimal(resultSet, columnIndexInResultSet);
-            bd = bd.setScale(vector.getScale(), roundingMode);
-            vector.set(currentIndex, bd);
+            try {
+                BigDecimal bd = getCleanBigDecimal(resultSet, columnIndexInResultSet);
+                bd = bd.setScale(vector.getScale(), roundingMode);
+                vector.set(currentIndex, bd);
+            } catch (ArithmeticException | IllegalArgumentException e) {
+                logger.fine(String.format(
+                    "Could not convert decimal value at row %d, column %d (vector scale=%d): %s",
+                    currentIndex, columnIndexInResultSet, vector.getScale(), e.getMessage()));
+            }
             currentIndex++;
         }
     }

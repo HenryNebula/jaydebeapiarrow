@@ -143,7 +143,7 @@ public class JDBCUtils {
             .setAllocator(allocator)
             .setCalendar(utcCalendar)
             .setTargetBatchSize(batchSize)
-            .setBigDecimalRoundingMode(RoundingMode.UNNECESSARY)
+            .setBigDecimalRoundingMode(RoundingMode.HALF_UP)
             .setExplicitTypesByColumnIndex(new ExplicitTypeMapper().createExplicitTypeMapping(resultSet))
             .setIncludeMetadata(true)
             .setJdbcToArrowTypeConverter((jdbcFieldInfo) -> overriden_consumer.getJdbcToArrowTypeConverter(jdbcFieldInfo))
