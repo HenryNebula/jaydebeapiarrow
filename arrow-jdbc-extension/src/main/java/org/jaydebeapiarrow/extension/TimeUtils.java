@@ -42,6 +42,13 @@ public class TimeUtils {
             }
             return parseDateLegacy(resultSet, columnIndexInResultSet, calendar);
         }
+        catch (NullPointerException e) {
+            // DB2's JDBC driver can throw NPE from getObject(..., LocalDate.class)
+            // when the value is SQL NULL. Fall back to getDate(), which reports
+            // null through ResultSet.wasNull().
+            useLegacy.compareAndSet(false, true);
+            return parseDateLegacy(resultSet, columnIndexInResultSet, calendar);
+        }
     }
 
     private static long parseDateLegacy(ResultSet resultSet, int columnIndexInResultSet, Calendar calendar) throws SQLException {
@@ -67,6 +74,13 @@ public class TimeUtils {
             if (useLegacy.compareAndSet(false, true)) {
                 logger.log(Level.WARNING, "Can not consume time using getObject (possibly due to lack of support for LocalTime). Falling back to legacy consumption.", e);
             }
+            return parseTimeLegacy(resultSet, columnIndexInResultSet, calendar);
+        }
+        catch (NullPointerException e) {
+            // DB2's JDBC driver can throw NPE from getObject(..., LocalTime.class)
+            // when the value is SQL NULL. Fall back to getTime(), which reports
+            // null through ResultSet.wasNull().
+            useLegacy.compareAndSet(false, true);
             return parseTimeLegacy(resultSet, columnIndexInResultSet, calendar);
         }
     }
@@ -96,6 +110,13 @@ public class TimeUtils {
             if (useLegacy.compareAndSet(false, true)) {
                 logger.log(Level.WARNING, "Can not consume timestamp using getObject (possibly due to lack of support for LocalDateTime). Falling back to legacy consumption.", e);
             }
+            return parseTimestampLegacy(resultSet, columnIndexInResultSet, calendar);
+        }
+        catch (NullPointerException e) {
+            // DB2's JDBC driver can throw NPE from getObject(..., LocalDateTime.class)
+            // when the value is SQL NULL. Fall back to getTimestamp(), which reports
+            // null through ResultSet.wasNull().
+            useLegacy.compareAndSet(false, true);
             return parseTimestampLegacy(resultSet, columnIndexInResultSet, calendar);
         }
     }
