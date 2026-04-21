@@ -350,6 +350,9 @@ jobs:
         docker run -d --name drill \
           -p 31010:31010 \
           -p 8047:8047 \
+          -e DRILLBIT_MAX_PROC_MEM=4G \
+          -e DRILL_HEAP=1G \
+          -e DRILL_MAX_DIRECT_MEMORY=2G \
           apache/drill:1.21.0
         echo "Waiting for Drill to be ready..."
         for i in $(seq 1 60); do
@@ -361,6 +364,7 @@ jobs:
           echo "  Waiting... ($i/60)"
           sleep 10
         done
+        docker logs drill
     - name: Pip cache
       uses: actions/cache@v5
       with:
