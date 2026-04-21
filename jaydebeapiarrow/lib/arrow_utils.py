@@ -18,11 +18,6 @@ def fetch_next_batch(it):
     Fetches the next batch from the ArrowVectorIterator 'it'.
     Returns a list of rows (tuples).
     Returns empty list if iterator is exhausted.
-
-    Some JDBC drivers (e.g. DB2) close the ResultSet after all rows are
-    consumed, causing ArrowVectorIterator.next() to throw a NullPointerException
-    even after hasNext() returned True. We catch that and treat it as
-    end-of-results.
     """
     if it.hasNext():
         try:
@@ -31,14 +26,6 @@ def fetch_next_batch(it):
             decimal_message = _find_decimal_conversion_message(e)
             if decimal_message:
                 raise RuntimeError(decimal_message) from e
-            if _is_java_null_pointer_exception(e):
-                import logging
-                logging.getLogger(__name__).warning(
-                    "NullPointerException from ArrowVectorIterator.next() — "
-                    "returning empty result. This is expected for some JDBC "
-                    "drivers (e.g. DB2) that close the ResultSet prematurely. "
-                    "Cause: %s", e)
-                return []
             raise
         try:
             batch = pa.jvm.record_batch(root).to_pylist()
@@ -47,13 +34,6 @@ def fetch_next_batch(it):
         finally:
             root.clear()
     return []
-
-
-def _is_java_null_pointer_exception(exc):
-    try:
-        return exc.getClass().getName() == "java.lang.NullPointerException"
-    except AttributeError:
-        return False
 
 
 def _find_decimal_conversion_message(exc):

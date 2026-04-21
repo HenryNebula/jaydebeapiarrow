@@ -163,7 +163,14 @@ public class DecimalConsumer {
      * JDBC driver returns a Double or Integer instead of a BigDecimal.
      */
     static BigDecimal getCleanBigDecimal(ResultSet resultSet, int columnIndex) throws SQLException {
-        Object obj = resultSet.getObject(columnIndex);
+        Object obj;
+        try {
+            obj = resultSet.getObject(columnIndex);
+        } catch (NullPointerException e) {
+            // Some JDBC drivers (e.g. DB2) throw NPE from getObject() on
+            // certain column types. Fall back to getBigDecimal().
+            return resultSet.getBigDecimal(columnIndex);
+        }
         if (obj == null) {
             return null;
         }
