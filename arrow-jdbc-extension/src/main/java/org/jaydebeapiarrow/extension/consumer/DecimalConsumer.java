@@ -9,7 +9,7 @@
  *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS" BASIS,
+ * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
@@ -46,7 +46,6 @@ public class DecimalConsumer {
 
     public static JdbcConsumer<DecimalVector> createConsumer(
             DecimalVector vector, int index, boolean nullable, RoundingMode roundingMode, int scale, int precision) {
-        System.err.println("[DEBUG DecimalConsumer.createConsumer] vector.scale=" + vector.getScale() + ", vector.precision=" + vector.getPrecision() + ", scale=" + scale + ", precision=" + precision + ", nullable=" + nullable);
         if (nullable) {
             return new NullableDecimalConsumer(vector, index, roundingMode, scale, precision);
         } else {
@@ -76,14 +75,11 @@ public class DecimalConsumer {
             try {
                 BigDecimal bd = getCleanBigDecimal(resultSet, columnIndexInResultSet);
                 if (!resultSet.wasNull()) {
-                    System.err.println("[DEBUG NullableDecimalConsumer] bd=" + bd + ", bd.precision()=" + bd.precision() + ", bd.scale()=" + bd.scale() + ", targetScale=" + scale + ", targetPrecision=" + precision);
                     bd = bd.setScale(scale, roundingMode);
-                    System.err.println("[DEBUG NullableDecimalConsumer] after setScale: bd=" + bd + ", bd.precision()=" + bd.precision() + ", bd.scale()=" + bd.scale());
                     validateDecimalFitsVector(bd, precision);
                     vector.set(currentIndex, bd);
                 }
             } catch (ArithmeticException | IllegalArgumentException e) {
-                System.err.println("[DEBUG NullableDecimalConsumer] caught exception: " + e.getClass().getName() + ": " + e.getMessage());
                 throw createDecimalConversionException(e, currentIndex, columnIndexInResultSet, precision, scale);
             }
             currentIndex++;
@@ -121,13 +117,10 @@ public class DecimalConsumer {
         public void consume(ResultSet resultSet) throws SQLException {
             try {
                 BigDecimal bd = getCleanBigDecimal(resultSet, columnIndexInResultSet);
-                System.err.println("[DEBUG NonNullableDecimalConsumer] bd=" + bd + ", bd.precision()=" + bd.precision() + ", bd.scale()=" + bd.scale() + ", targetScale=" + scale + ", targetPrecision=" + precision);
                 bd = bd.setScale(scale, roundingMode);
-                System.err.println("[DEBUG NonNullableDecimalConsumer] after setScale: bd=" + bd + ", bd.precision()=" + bd.precision() + ", bd.scale()=" + bd.scale());
                 validateDecimalFitsVector(bd, precision);
                 vector.set(currentIndex, bd);
             } catch (ArithmeticException | IllegalArgumentException e) {
-                System.err.println("[DEBUG NonNullableDecimalConsumer] caught exception: " + e.getClass().getName() + ": " + e.getMessage());
                 throw createDecimalConversionException(e, currentIndex, columnIndexInResultSet, precision, scale);
             }
             currentIndex++;

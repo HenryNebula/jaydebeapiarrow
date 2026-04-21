@@ -487,8 +487,6 @@ class Cursor(object):
     def _close_last(self):
         """Close the resultset and reset collected meta data.
         """
-        import sys
-        print(f"[DEBUG _close_last] self._iter={self._iter}, self._rs={self._rs}, id(cursor)={id(self)}", file=sys.stderr)
         if self._iter:
             try:
                 self._iter.close()
@@ -594,9 +592,7 @@ class Cursor(object):
         self._close_last()
 
     def _get_iter(self):
-        import sys
         if self._iter:
-            print(f"[DEBUG _get_iter] returning CACHED iter={self._iter}, hashCode={self._iter.hashCode()}", file=sys.stderr)
             return self._iter
         if not self._rs:
             raise Error()
@@ -609,21 +605,14 @@ class Cursor(object):
         return self._iter
 
     def fetchone(self):
-        import sys as _sys
-        _sys.stderr.write(f"[DEBUG fetchone] id={id(self)}, _rs={self._rs}, _buffer={self._buffer}, _iter={self._iter}\n")
-        _sys.stderr.flush()
         if not self._rs:
             raise Error()
 
         if self._buffer:
-            _sys.stderr.write(f"[DEBUG fetchone] returning from _buffer, len={len(self._buffer)}\n")
-            _sys.stderr.flush()
             return self._buffer.pop(0)
 
         it = self._get_iter()
-        print(f"[DEBUG fetchone] calling fetch_next_batch, it.hasNext()={it.hasNext()}", file=__import__('sys').stderr)
         rows = fetch_next_batch(it)
-        print(f"[DEBUG fetchone] fetch_next_batch returned {len(rows)} rows", file=__import__('sys').stderr)
         if rows:
             self._buffer.extend(rows)
             return self._buffer.pop(0)
