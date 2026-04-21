@@ -376,7 +376,7 @@ class SqlitePyTest(SqliteTestBase, unittest.TestCase):
         return sqlite3, self.ConnectionWithClosing(sqlite3.connect(':memory:', detect_types=sqlite3.PARSE_DECLTYPES))
 
     def test_execute_type_time(self):
-        """Time type not supported by PySqlite"""
+        self.skipTest("Time type not supported by PySqlite")
 
 class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
 
@@ -564,7 +564,7 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
         try:
             db, conn = jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args)
         except jpype.JException:
-            self.skipTest("Can not connect with PostgreSQL. Please check if the instance is up and running.")
+            self.fail("Can not connect with PostgreSQL. Please check if the instance is up and running.")
         else:
             return db, conn
 
@@ -647,7 +647,7 @@ class MySQLTest(IntegrationTestBase, unittest.TestCase):
         try:
             db, conn = jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args)
         except jpype.JException as e:
-            self.skipTest("Can not connect with MySQL. Please check if the instance is up and running.")
+            self.fail("Can not connect with MySQL. Please check if the instance is up and running.")
         else:
             return db, conn
 
@@ -676,7 +676,7 @@ class MSSQLTest(IntegrationTestBase, unittest.TestCase):
         try:
             db, conn = jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args)
         except jpype.JException:
-            self.skipTest("Can not connect with MS SQL Server. Please check if the instance is up and running.")
+            self.fail("Can not connect with MS SQL Server. Please check if the instance is up and running.")
         else:
             return db, conn
 
@@ -712,7 +712,7 @@ class TrinoTest(IntegrationTestBase, unittest.TestCase):
         try:
             db, conn = jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args)
         except jpype.JException:
-            self.skipTest("Can not connect with Trino. Please check if the instance is up and running.")
+            self.fail("Can not connect with Trino. Please check if the instance is up and running.")
         else:
             return db, conn
 
@@ -723,23 +723,30 @@ class TrinoTest(IntegrationTestBase, unittest.TestCase):
     def tearDown(self):
         with self.conn.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS ACCOUNT")
+            cursor.execute("DROP TABLE IF EXISTS NUMERIC_TEST")
         self.conn.close()
 
     def test_execute_reset_description_without_execute_result(self):
         """Trino memory connector does not support DELETE."""
         self.skipTest("Trino memory connector does not support modifying table rows")
 
-    def _numeric_create_table_sql(self):
-        """Trino uses DECIMAL instead of NUMERIC."""
-        return (
-            "CREATE TABLE NUMERIC_TEST ("
-            "ID INTEGER, "
-            "NUM_COL DECIMAL(10, 2))"
-        )
-
     def test_numeric_types(self):
-        """Trino memory connector does not support INSERT INTO ... VALUES."""
-        self.skipTest("Trino memory connector does not support INSERT INTO ... VALUES")
+        """Trino memory connector does not support INSERT INTO ... VALUES — use CTAS instead."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS NUMERIC_TEST")
+            cursor.execute(
+                "CREATE TABLE NUMERIC_TEST AS "
+                "SELECT 1 AS ID, CAST(NULL AS DECIMAL(10, 2)) AS NUM_COL "
+                "UNION ALL "
+                "SELECT 2, CAST(99.99 AS DECIMAL(10, 2)) "
+                "UNION ALL "
+                "SELECT 3, CAST(100.00 AS DECIMAL(10, 2))")
+            cursor.execute("SELECT NUM_COL FROM NUMERIC_TEST ORDER BY ID")
+            result = cursor.fetchall()
+        self.assertEqual(len(result), 3)
+        self.assertIsNone(result[0][0])
+        self.assertEqual(result[1][0], Decimal('99.99'))
+        self.assertEqual(result[2][0], Decimal('100.00'))
 
 
 class OracleTest(IntegrationTestBase, unittest.TestCase):
@@ -762,7 +769,7 @@ class OracleTest(IntegrationTestBase, unittest.TestCase):
         try:
             db, conn = jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args)
         except jpype.JException:
-            self.skipTest("Can not connect with Oracle. Please check if the instance is up and running.")
+            self.fail("Can not connect with Oracle. Please check if the instance is up and running.")
         else:
             return db, conn
 
@@ -865,7 +872,7 @@ class DB2Test(IntegrationTestBase, unittest.TestCase):
         try:
             db, conn = jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args)
         except jpype.JException:
-            self.skipTest("Can not connect with DB2. Please check if the instance is up and running.")
+            self.fail("Can not connect with DB2. Please check if the instance is up and running.")
         else:
             return db, conn
 
@@ -923,7 +930,7 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
         try:
             db, conn = jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args)
         except jpype.JException:
-            self.skipTest("Can not connect with Drill. Please check if the instance is up and running.")
+            self.fail("Can not connect with Drill. Please check if the instance is up and running.")
         else:
             return db, conn
 
