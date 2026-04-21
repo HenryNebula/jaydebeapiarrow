@@ -352,13 +352,14 @@ jobs:
           -p 8047:8047 \
           apache/drill:1.21.0
         echo "Waiting for Drill to be ready..."
-        for i in $(seq 1 30); do
-          if curl -sf http://localhost:8047/stats.json >/dev/null 2>&1; then
+        for i in $(seq 1 60); do
+          if curl -sf http://localhost:8047/stats.json >/dev/null 2>&1 \
+             && nc -z localhost 31010 2>/dev/null; then
             echo "Drill is ready!"
             break
           fi
-          echo "  Waiting... ($i/30)"
-          sleep 5
+          echo "  Waiting... ($i/60)"
+          sleep 10
         done
     - name: Pip cache
       uses: actions/cache@v5
