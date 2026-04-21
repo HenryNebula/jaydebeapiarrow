@@ -347,22 +347,20 @@ jobs:
         key: ${{ runner.os }}-jdbc-drivers-${{ hashFiles('test/download_jdbc_drivers.sh') }}
     - name: Start Drill container
       run: |
-        docker run -d --name drill \
+        docker run -d -i --name drill \
           -p 31010:31010 \
-          -p 8047:8047 \
           -e DRILLBIT_MAX_PROC_MEM=4G \
           -e DRILL_HEAP=1G \
           -e DRILL_MAX_DIRECT_MEMORY=2G \
           apache/drill:1.21.0
         echo "Waiting for Drill to be ready..."
-        for i in $(seq 1 60); do
-          if curl -sf http://localhost:8047/stats.json >/dev/null 2>&1 \
-             && nc -z localhost 31010 2>/dev/null; then
+        for i in $(seq 1 30); do
+          if nc -z localhost 31010 2>/dev/null; then
             echo "Drill is ready!"
             break
           fi
-          echo "  Waiting... ($i/60)"
-          sleep 10
+          echo "  Waiting... ($i/30)"
+          sleep 5
         done
         docker logs drill
     - name: Pip cache
