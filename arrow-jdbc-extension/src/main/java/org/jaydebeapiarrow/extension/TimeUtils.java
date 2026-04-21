@@ -86,9 +86,9 @@ public class TimeUtils {
     }
 
     private static int parseTimeLegacy(ResultSet resultSet, int columnIndexInResultSet, Calendar calendar) throws SQLException {
-        Time time = resultSet.getTime(columnIndexInResultSet, calendar != null ? calendar : JdbcToArrowUtils.getUtcCalendar());
+        Time time = resultSet.getTime(columnIndexInResultSet);
         if (time != null) {
-            return (int) time.getTime(); /* since date components set to the "zero epoch" by driver */
+            return time.toLocalTime().toSecondOfDay() * 1000;
         }
         return 0;
     }
