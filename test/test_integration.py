@@ -24,6 +24,7 @@
 
 import jaydebeapiarrow
 
+import calendar
 import os
 import sys
 import threading
@@ -31,7 +32,7 @@ import threading
 import unittest
 
 from decimal import Decimal
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from collections import namedtuple
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -349,6 +350,15 @@ class SqliteTestBase(IntegrationTestBase):
 class SqlitePyTest(SqliteTestBase, unittest.TestCase):
 
     JDBC_SUPPORT_TEMPORAL_TYPE = True
+
+    def _numeric_create_table_sql(self):
+        """Use DECIMAL so sqlite3's detect_types converter fires."""
+        return (
+            "CREATE TABLE NUMERIC_TEST ("
+            "ID INTEGER NOT NULL, "
+            "NUM_COL DECIMAL(10, 2), "
+            "PRIMARY KEY (ID))"
+        )
 
     class ConnectionWithClosing:
         def __init__(self, conn):
@@ -917,18 +927,34 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
         else:
             return db, conn
 
+    def _cast_datetime(self, datetime_str, fmt=r'%Y-%m-%d %H:%M:%S'):
+        """Drill stores TIMESTAMP as UTC and shifts by JVM timezone on read."""
+        dt = super()._cast_datetime(datetime_str, fmt)
+        import jpype
+        tz = jpype.JClass('java.util.TimeZone').getDefault()
+        epoch_ms = int(calendar.timegm(dt.timetuple())) * 1000
+        offset_ms = tz.getOffset(epoch_ms)
+        return dt + timedelta(milliseconds=-offset_ms)
+
     def setUpSql(self):
+        jstmt = self.conn.jconn.createStatement()
         try:
-            self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_drill.sql'))
+            jstmt.execute("DROP TABLE IF EXISTS dfs.tmp.account")
         except Exception:
-            pass  # CTAS may fail via JDBC; individual tests handle this
+            pass
+        sql = open(os.path.join(_THIS_DIR, 'data', 'create_drill.sql')).read().strip().rstrip(';')
+        jstmt.execute(sql)
 
     def tearDown(self):
-        with self.conn.cursor() as cursor:
-            try:
-                cursor.execute("DROP TABLE IF EXISTS dfs.tmp.account")
-            except Exception:
-                pass
+        jstmt = self.conn.jconn.createStatement()
+        try:
+            jstmt.execute("DROP TABLE IF EXISTS dfs.tmp.account")
+        except Exception:
+            pass
+        try:
+            jstmt.execute("DROP TABLE IF EXISTS dfs.tmp.numeric_test")
+        except Exception:
+            pass
         self.conn.close()
 
     def _query_table(self, cursor):
@@ -940,20 +966,58 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
         self.skipTest("Drill does not support INSERT INTO ... VALUES")
 
     def test_execute_types(self):
-        """Drill has no INSERT INTO ... VALUES — skip types test."""
-        self.skipTest("Drill does not support INSERT INTO ... VALUES")
+        """Drill preserves DECIMAL scale; data seeded via CTAS, no INSERT."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING, "
+                "DBL_COL, OPENED_AT, VALID, PRODUCT_NAME "
+                "FROM dfs.tmp.account WHERE ACCOUNT_NO = 20")
+            result = cursor.fetchone()
+        exp = (
+            self._cast_datetime('2010-01-26 14:31:59', r'%Y-%m-%d %H:%M:%S'),
+            20, Decimal('1.20'), Decimal('10.00'), 3.5,
+            self._cast_date('2024-01-15', r'%Y-%m-%d'),
+            True, 'Savings account'
+        )
+        self.assertEqual(result, exp)
 
     def test_execute_type_time(self):
-        """Drill has no INSERT INTO ... VALUES — skip time test."""
-        self.skipTest("Drill does not support INSERT INTO ... VALUES")
+        """Drill: TIME data seeded via CTAS, no INSERT needed."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT ACCOUNT_ID, ACCOUNT_NO, BALANCE, OPENED_AT_TIME "
+                "FROM dfs.tmp.account WHERE ACCOUNT_NO = 20")
+            result = cursor.fetchone()
+        exp = (
+            self._cast_datetime('2010-01-26 14:31:59', r'%Y-%m-%d %H:%M:%S'),
+            20, Decimal('1.20'),
+            self._cast_time('13:59:59', r'%H:%M:%S')
+        )
+        self.assertEqual(result, exp)
 
     def test_execute_type_blob(self):
         """Drill has no INSERT INTO ... VALUES — skip blob test."""
         self.skipTest("Drill does not support INSERT INTO ... VALUES")
 
     def test_numeric_types(self):
-        """Drill has no INSERT INTO ... VALUES — skip numeric types test."""
-        self.skipTest("Drill does not support INSERT INTO ... VALUES")
+        """Drill: seed NUMERIC_TEST via CTAS, then verify round-trip."""
+        jstmt = self.conn.jconn.createStatement()
+        jstmt.execute('DROP TABLE IF EXISTS dfs.tmp.numeric_test')
+        jstmt.execute(
+            "CREATE TABLE dfs.tmp.numeric_test AS "
+            "SELECT 1 AS ID, CAST(NULL AS DECIMAL(10, 2)) AS NUM_COL "
+            "UNION ALL "
+            "SELECT 2, CAST(99.99 AS DECIMAL(10, 2)) "
+            "UNION ALL "
+            "SELECT 3, CAST(100.00 AS DECIMAL(10, 2))")
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT NUM_COL FROM dfs.tmp.numeric_test ORDER BY ID")
+            result = cursor.fetchall()
+        self.assertEqual(len(result), 3)
+        self.assertIsNone(result[0][0])
+        self.assertEqual(result[1][0], Decimal('99.99'))
+        self.assertEqual(result[2][0], Decimal('100.00'))
 
     def test_execute_different_rowcounts(self):
         """Drill has no INSERT INTO ... VALUES — skip rowcount test."""
@@ -969,7 +1033,7 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
     def test_execute_and_fetch(self):
         with self.conn.cursor() as cursor:
             cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING "
-                           "from dfs.tmp.account")
+                           "from dfs.tmp.account WHERE ACCOUNT_NO <= 19")
             result = cursor.fetchall()
         self.assertEqual(result, [
             (
@@ -977,13 +1041,13 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
             18, Decimal('12.40'), None),
             (
             self._cast_datetime('2009-09-11 14:15:22.123', r'%Y-%m-%d %H:%M:%S.%f'),
-            19, Decimal('12.90'), Decimal('1'))
+            19, Decimal('12.90'), Decimal('1.00'))
         ])
 
     def test_execute_and_fetchone(self):
         with self.conn.cursor() as cursor:
             cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING "
-                           "from dfs.tmp.account order by ACCOUNT_NO")
+                           "from dfs.tmp.account WHERE ACCOUNT_NO <= 19 order by ACCOUNT_NO")
             result = cursor.fetchone()
         self.assertEqual(result, (
             self._cast_datetime('2009-09-10 14:15:22.123', r'%Y-%m-%d %H:%M:%S.%f'),
@@ -993,7 +1057,7 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
     def test_execute_and_fetchone_consecutive(self):
         with self.conn.cursor() as cursor:
             cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING "
-                           "from dfs.tmp.account order by ACCOUNT_NO")
+                           "from dfs.tmp.account WHERE ACCOUNT_NO <= 19 order by ACCOUNT_NO")
             result1 = cursor.fetchone()
             result2 = cursor.fetchone()
 
@@ -1003,12 +1067,30 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
 
         self.assertEqual(result2, (
             self._cast_datetime('2009-09-11 14:15:22.123', r'%Y-%m-%d %H:%M:%S.%f'),
-            19, Decimal('12.90'), Decimal('1')))
+            19, Decimal('12.90'), Decimal('1.00')))
+
+    def test_execute_and_fetch_no_data(self):
+        with self.conn.cursor() as cursor:
+            stmt = "select * from dfs.tmp.account where ACCOUNT_ID is null"
+            cursor.execute(stmt)
+            result = cursor.fetchall()
+        self.assertEqual(result, [])
+
+    def test_execute_and_fetch_parameter(self):
+        """Drill does not support JDBC parameterized queries."""
+        self.skipTest("Drill does not support prepared statement parameters")
+
+    def test_execute_and_fetchone_after_end(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("select * from dfs.tmp.account where ACCOUNT_NO = 18")
+            cursor.fetchone()
+            result = cursor.fetchone()
+        self.assertIsNone(result)
 
     def test_execute_and_fetchmany(self):
         with self.conn.cursor() as cursor:
             cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING "
-                           "from dfs.tmp.account order by ACCOUNT_NO")
+                           "from dfs.tmp.account WHERE ACCOUNT_NO <= 19 order by ACCOUNT_NO")
             result = cursor.fetchmany()
         self.assertEqual(result, [
             (
