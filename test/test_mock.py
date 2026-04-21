@@ -35,6 +35,9 @@ class MockTest(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
 
+    # JDBC types not supported by the Arrow data path (no Arrow type mapping)
+    _ARROW_UNSUPPORTED_TYPES = {'OTHER', 'NCLOB', 'SQLXML', 'ROWID'}
+
     def test_all_db_api_type_objects_have_valid_mapping(self):
         extra_type_mappings = {
             'DATE': 'getDate',
@@ -51,6 +54,8 @@ class MockTest(unittest.TestCase):
         for db_api_type in jaydebeapiarrow.__dict__.values():
             if isinstance(db_api_type, jaydebeapiarrow.DBAPITypeObject):
                 for jsql_type_name in db_api_type.values:
+                    if jsql_type_name in self._ARROW_UNSUPPORTED_TYPES:
+                        continue
                     self.conn.jconn.mockType(jsql_type_name)
                     with self.conn.cursor() as cursor:
                         cursor.execute("dummy stmt")

@@ -162,6 +162,34 @@ public class ExplicitTypeMapper {
             }
         }
 
+        /* Detect JSON/JSONB/UUID columns reported as Types.OTHER (e.g., PostgreSQL).
+         * Map to VARCHAR so they are read as strings via the default Arrow path. */
+        for (int columnIndex = 1; columnIndex <= resultSet.getMetaData().getColumnCount(); columnIndex++) {
+            int columnType = resultSet.getMetaData().getColumnType(columnIndex);
+            String columnTypeName = resultSet.getMetaData().getColumnTypeName(columnIndex);
+            if (columnType == Types.OTHER) {
+                String upperTypeName = columnTypeName.toUpperCase();
+                if (upperTypeName.contains("JSON") || upperTypeName.contains("UUID")) {
+                    explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
+                    logger.fine(String.format(
+                            "Detected column %1s (%2s) as VARCHAR from type name '%3s' (JDBC type OTHER)",
+                            columnIndex, resultSet.getMetaData().getColumnName(columnIndex),
+                            columnTypeName));
+                }
+            }
+        }
+
+        /* Detect ARRAY columns - not natively supported by Arrow JDBC adapter.
+         * Map to VARCHAR as a degraded fallback (toString representation). */
+        List<Integer> arrayColumnIndices = parsedMetaData.getOrDefault(Types.ARRAY, new ArrayList<>());
+        for (int columnIndex : arrayColumnIndices) {
+            explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
+            logger.warning(String.format(
+                    "Column %1s (%2s) is ARRAY type, which is not natively supported. "
+                    + "Falling back to VARCHAR (toString representation).",
+                    columnIndex, resultSet.getMetaData().getColumnName(columnIndex)));
+        }
+
         for (int columnIndex: decimalColumnIndices) {
             int precision = resultSet.getMetaData().getPrecision(columnIndex);
             int scale = resultSet.getMetaData().getScale(columnIndex);

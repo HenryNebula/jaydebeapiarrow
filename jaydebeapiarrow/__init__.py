@@ -274,9 +274,9 @@ class DBAPITypeObject(object):
             return None
 
 
-STRING = DBAPITypeObject('STRING', 'CHAR', 'NCHAR', 'NVARCHAR', 'VARCHAR') # TODO: 'OTHER' not supported
+STRING = DBAPITypeObject('STRING', 'CHAR', 'NCHAR', 'NVARCHAR', 'VARCHAR', 'OTHER')
 
-TEXT = DBAPITypeObject('TEXT', 'CLOB', 'LONGVARCHAR', 'LONGNVARCHAR') # TODO: 'NCLOB', 'SQLXML' not supported
+TEXT = DBAPITypeObject('TEXT', 'CLOB', 'LONGVARCHAR', 'LONGNVARCHAR', 'NCLOB', 'SQLXML')
 
 BINARY = DBAPITypeObject('BINARY', 'BINARY', 'BLOB', 'LONGVARBINARY', 'VARBINARY')
 
@@ -293,7 +293,7 @@ TIME = DBAPITypeObject('TIME', 'TIME')
 
 DATETIME = DBAPITypeObject('TIMESTAMP', 'TIMESTAMP')
 
-# ROWID = DBAPITypeObject('ROWID', 'ROWID') # TODO: 'ROWID' not supported
+ROWID = DBAPITypeObject('ROWID', 'ROWID')
 
 # DB-API 2.0 Module Interface Exceptions
 class Error(Exception):
@@ -540,8 +540,12 @@ class Cursor(object):
 
         def _to_java(p):
             """Convert Python types to Java SQL types for setObject()."""
+            if p is None:
+                return p  # JPype passes Python None as Java null; setObject(i, null) is valid JDBC
             if isinstance(p, bool):
                 return p
+            if isinstance(p, (bytes, bytearray)):
+                return jpype.JArray(jpype.JByte)(p)
             if isinstance(p, datetime.datetime):
                 return jpype.JClass("java.sql.Timestamp").valueOf(
                     p.strftime("%Y-%m-%d %H:%M:%S"))
@@ -551,6 +555,12 @@ class Cursor(object):
                 return jpype.JClass("java.sql.Time").valueOf(p.isoformat())
             if isinstance(p, Decimal):
                 return jpype.JClass("java.math.BigDecimal")(str(p))
+            if isinstance(p, list):
+                raise NotSupportedError(
+                    "ARRAY type parameter binding is not supported. "
+                    "Use server-side SQL functions to construct arrays, "
+                    "or cast to VARCHAR in your query."
+                )
             return p
 
         if is_batch:
