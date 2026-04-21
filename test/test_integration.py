@@ -955,6 +955,10 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
             jstmt.execute("DROP TABLE IF EXISTS dfs.tmp.numeric_test")
         except Exception:
             pass
+        try:
+            jstmt.execute("DROP TABLE IF EXISTS dfs.tmp.blob_test")
+        except Exception:
+            pass
         self.conn.close()
 
     def _query_table(self, cursor):
@@ -996,8 +1000,17 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
         self.assertEqual(result, exp)
 
     def test_execute_type_blob(self):
-        """Drill has no INSERT INTO ... VALUES — skip blob test."""
-        self.skipTest("Drill does not support INSERT INTO ... VALUES")
+        """Drill: seed VARBINARY via separate CTAS, verify read path."""
+        jstmt = self.conn.jconn.createStatement()
+        jstmt.execute('DROP TABLE IF EXISTS dfs.tmp.blob_test')
+        jstmt.execute(
+            "CREATE TABLE dfs.tmp.blob_test AS "
+            "SELECT CAST('abcdef' AS VARBINARY) AS STUFF FROM (VALUES(1))")
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT STUFF FROM dfs.tmp.blob_test")
+            result = cursor.fetchone()
+        binary_stuff = b'abcdef'
+        self.assertEqual(result[0], memoryview(binary_stuff))
 
     def test_numeric_types(self):
         """Drill: seed NUMERIC_TEST via CTAS, then verify round-trip."""
