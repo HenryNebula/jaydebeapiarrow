@@ -122,14 +122,6 @@ class MockTest(unittest.TestCase):
 
         with self.conn.cursor() as cursor:
             cursor.execute("dummy stmt")
-            # Verify the mock ResultSet is correctly configured
-            rs = cursor._rs
-            import sys
-            print(f"[TEST DEBUG] rs={rs}, rs.class={rs.getClass().getName()}, id={id(cursor)}", file=sys.stderr)
-            meta = rs.getMetaData()
-            print(f"[TEST DEBUG] precision={meta.getPrecision(1)}, scale={meta.getScale(1)}, columnType={meta.getColumnType(1)}", file=sys.stderr)
-            obj = rs.getObject(1)
-            print(f"[TEST DEBUG] obj={obj}, obj.class={obj.getClass().getName() if obj else 'null'}", file=sys.stderr)
             with self.assertRaises(Exception) as cm:
                 cursor.fetchone()
 

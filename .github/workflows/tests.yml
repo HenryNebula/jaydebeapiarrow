@@ -63,17 +63,11 @@ jobs:
         key: ${{ matrix.plattform }}-${{ matrix.python-version }}-maven-${{ hashFiles('**/pom.xml') }}
         restore-keys: |
           ${{ matrix.plattform }}-${{ matrix.python-version }}-maven-
-    - name: JARs cache
+    - name: JDBC driver cache
       uses: actions/cache@v5
       with:
-        path: |
-          jaydebeapiarrow/lib/
-          test/jars/
-          arrow-jdbc-extension/target/
-          mockdriver/target/
-        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
-        restore-keys: |
-          ${{ runner.os }}-jars-
+        path: test/jars/
+        key: ${{ runner.os }}-jdbc-drivers-${{ hashFiles('test/download_jdbc_drivers.sh') }}
     - name: Pip cache
       uses: actions/cache@v5
       with:
@@ -142,17 +136,6 @@ jobs:
       with:
         java-version: '11'
         distribution: 'temurin'
-    - name: JARs cache
-      uses: actions/cache@v5
-      with:
-        path: |
-          jaydebeapiarrow/lib/
-          test/jars/
-          arrow-jdbc-extension/target/
-          mockdriver/target/
-        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
-        restore-keys: |
-          ${{ runner.os }}-jars-
     - name: Pip cache
       uses: actions/cache@v5
       with:
@@ -204,17 +187,6 @@ jobs:
       with:
         java-version: '11'
         distribution: 'temurin'
-    - name: JARs cache
-      uses: actions/cache@v5
-      with:
-        path: |
-          jaydebeapiarrow/lib/
-          test/jars/
-          arrow-jdbc-extension/target/
-          mockdriver/target/
-        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
-        restore-keys: |
-          ${{ runner.os }}-jars-
     - name: Pip cache
       uses: actions/cache@v5
       with:
@@ -268,17 +240,6 @@ jobs:
       with:
         java-version: '11'
         distribution: 'temurin'
-    - name: JARs cache
-      uses: actions/cache@v5
-      with:
-        path: |
-          jaydebeapiarrow/lib/
-          test/jars/
-          arrow-jdbc-extension/target/
-          mockdriver/target/
-        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
-        restore-keys: |
-          ${{ runner.os }}-jars-
     - name: Pip cache
       uses: actions/cache@v5
       with:
@@ -317,17 +278,11 @@ jobs:
       with:
         java-version: '11'
         distribution: 'temurin'
-    - name: JARs cache
+    - name: JDBC driver cache
       uses: actions/cache@v5
       with:
-        path: |
-          jaydebeapiarrow/lib/
-          test/jars/
-          arrow-jdbc-extension/target/
-          mockdriver/target/
-        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
-        restore-keys: |
-          ${{ runner.os }}-jars-
+        path: test/jars/
+        key: ${{ runner.os }}-jdbc-drivers-${{ hashFiles('test/download_jdbc_drivers.sh') }}
     - name: Start DB2 container
       run: |
         docker run -d --name db2 --privileged \
@@ -385,17 +340,11 @@ jobs:
       with:
         java-version: '11'
         distribution: 'temurin'
-    - name: JARs cache
+    - name: JDBC driver cache
       uses: actions/cache@v5
       with:
-        path: |
-          jaydebeapiarrow/lib/
-          test/jars/
-          arrow-jdbc-extension/target/
-          mockdriver/target/
-        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
-        restore-keys: |
-          ${{ runner.os }}-jars-
+        path: test/jars/
+        key: ${{ runner.os }}-jdbc-drivers-${{ hashFiles('test/download_jdbc_drivers.sh') }}
     - name: Start Drill container
       run: |
         docker run -d --name drill \
