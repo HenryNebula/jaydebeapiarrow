@@ -326,6 +326,50 @@ class IntegrationTestBase(object):
         self.assertEqual(result[1][0], Decimal('99.99'))
         self.assertEqual(result[2][0], Decimal('100.00'))
 
+    def test_numeric_precision_scale_combos(self):
+        """Test various DECIMAL/NUMERIC precision/scale combinations."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(self._numeric_combo_create_sql())
+            cursor.execute(self._numeric_combo_insert_sql())
+            cursor.execute("SELECT DEC_S2, DEC_S4, DEC_S0, DEC_PES, "
+                           "NUM_S2, NUM_S0, NUM_S4, NUM_PES, NUM_NEG "
+                           "FROM NUMERIC_COMBO ORDER BY ID")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal('12345.67'))          # DECIMAL(10, 2)
+        self.assertEqual(result[1], Decimal('12345.6789'))        # DECIMAL(15, 4)
+        self.assertEqual(result[2], Decimal('987654321012345678')) # DECIMAL(18, 0)
+        self.assertEqual(result[3], Decimal('0.12345'))           # DECIMAL(5, 5)
+        self.assertEqual(result[4], Decimal('99.99'))             # NUMERIC(10, 2)
+        self.assertEqual(result[5], Decimal('42'))                # NUMERIC(10, 0)
+        self.assertEqual(result[6], Decimal('12345.6789'))        # NUMERIC(15, 4)
+        self.assertEqual(result[7], Decimal('0.1234'))            # NUMERIC(4, 4)
+        self.assertEqual(result[8], Decimal('-99.99'))            # NUMERIC(10, 2)
+
+    def _numeric_combo_create_sql(self):
+        return (
+            "CREATE TABLE NUMERIC_COMBO ("
+            "ID INTEGER NOT NULL, "
+            "DEC_S2 DECIMAL(10, 2), "
+            "DEC_S4 DECIMAL(15, 4), "
+            "DEC_S0 DECIMAL(18, 0), "
+            "DEC_PES DECIMAL(5, 5), "
+            "NUM_S2 NUMERIC(10, 2), "
+            "NUM_S0 NUMERIC(10, 0), "
+            "NUM_S4 NUMERIC(15, 4), "
+            "NUM_PES NUMERIC(4, 4), "
+            "NUM_NEG NUMERIC(10, 2), "
+            "PRIMARY KEY (ID))"
+        )
+
+    def _numeric_combo_insert_sql(self):
+        return (
+            "INSERT INTO NUMERIC_COMBO "
+            "(ID, DEC_S2, DEC_S4, DEC_S0, DEC_PES, "
+            "NUM_S2, NUM_S0, NUM_S4, NUM_PES, NUM_NEG) "
+            "VALUES (1, 12345.67, 12345.6789, 987654321012345678, 0.12345, "
+            "99.99, 42, 12345.6789, 0.1234, -99.99)"
+        )
+
     def _numeric_create_table_sql(self):
         return (
             "CREATE TABLE NUMERIC_TEST ("
@@ -338,6 +382,10 @@ class IntegrationTestBase(object):
         with self.conn.cursor() as cursor:
             try:
                 cursor.execute("DROP TABLE NUMERIC_TEST")
+            except Exception:
+                pass
+            try:
+                cursor.execute("DROP TABLE NUMERIC_COMBO")
             except Exception:
                 pass
 
@@ -377,6 +425,9 @@ class SqlitePyTest(SqliteTestBase, unittest.TestCase):
 
     def test_execute_type_time(self):
         self.skipTest("Time type not supported by PySqlite")
+
+    def test_numeric_precision_scale_combos(self):
+        self.skipTest("SQLite type affinity makes NUMERIC/DECIMAL precision unreliable")
 
 class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
 
@@ -724,6 +775,7 @@ class TrinoTest(IntegrationTestBase, unittest.TestCase):
         with self.conn.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS ACCOUNT")
             cursor.execute("DROP TABLE IF EXISTS NUMERIC_TEST")
+            cursor.execute("DROP TABLE IF EXISTS NUMERIC_COMBO")
         self.conn.close()
 
     def test_execute_reset_description_without_execute_result(self):
@@ -747,6 +799,36 @@ class TrinoTest(IntegrationTestBase, unittest.TestCase):
         self.assertIsNone(result[0][0])
         self.assertEqual(result[1][0], Decimal('99.99'))
         self.assertEqual(result[2][0], Decimal('100.00'))
+
+    def test_numeric_precision_scale_combos(self):
+        """Trino memory connector does not support INSERT — use CTAS instead."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS NUMERIC_COMBO")
+            cursor.execute(
+                "CREATE TABLE NUMERIC_COMBO AS "
+                "SELECT 1 AS ID, "
+                "CAST(12345.67 AS DECIMAL(10, 2)) AS DEC_S2, "
+                "CAST(12345.6789 AS DECIMAL(15, 4)) AS DEC_S4, "
+                "CAST(987654321012345678 AS DECIMAL(18, 0)) AS DEC_S0, "
+                "CAST(0.12345 AS DECIMAL(5, 5)) AS DEC_PES, "
+                "CAST(99.99 AS DECIMAL(10, 2)) AS NUM_S2, "
+                "CAST(42 AS DECIMAL(10, 0)) AS NUM_S0, "
+                "CAST(12345.6789 AS DECIMAL(15, 4)) AS NUM_S4, "
+                "CAST(0.1234 AS DECIMAL(4, 4)) AS NUM_PES, "
+                "CAST(-99.99 AS DECIMAL(10, 2)) AS NUM_NEG")
+            cursor.execute("SELECT DEC_S2, DEC_S4, DEC_S0, DEC_PES, "
+                           "NUM_S2, NUM_S0, NUM_S4, NUM_PES, NUM_NEG "
+                           "FROM NUMERIC_COMBO ORDER BY ID")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal('12345.67'))
+        self.assertEqual(result[1], Decimal('12345.6789'))
+        self.assertEqual(result[2], Decimal('987654321012345678'))
+        self.assertEqual(result[3], Decimal('0.12345'))
+        self.assertEqual(result[4], Decimal('99.99'))
+        self.assertEqual(result[5], Decimal('42'))
+        self.assertEqual(result[6], Decimal('12345.6789'))
+        self.assertEqual(result[7], Decimal('0.1234'))
+        self.assertEqual(result[8], Decimal('-99.99'))
 
 
 class OracleTest(IntegrationTestBase, unittest.TestCase):
@@ -840,14 +922,27 @@ class OracleTest(IntegrationTestBase, unittest.TestCase):
         self.assertEqual(result, exp)
 
     def _numeric_create_table_sql(self):
-        """Oracle uses NUMBER instead of NUMERIC.
-        Avoid NUMBER(p,0) for the ID column because OverriddenConsumer defaults
-        scale=0 to min(17,precision), which causes precision overflow for integer
-        values. Use VARCHAR2 for the ID instead to isolate the NUMERIC test."""
+        """Oracle uses NUMBER instead of NUMERIC/DECIMAL."""
         return (
             "CREATE TABLE NUMERIC_TEST ("
-            "ID VARCHAR2(10) NOT NULL, "
+            "ID INTEGER NOT NULL, "
             "NUM_COL NUMBER(10, 2), "
+            "PRIMARY KEY (ID))"
+        )
+
+    def _numeric_combo_create_sql(self):
+        return (
+            "CREATE TABLE NUMERIC_COMBO ("
+            "ID INTEGER NOT NULL, "
+            "DEC_S2 NUMBER(10, 2), "
+            "DEC_S4 NUMBER(15, 4), "
+            "DEC_S0 NUMBER(18, 0), "
+            "DEC_PES NUMBER(5, 5), "
+            "NUM_S2 NUMBER(10, 2), "
+            "NUM_S0 NUMBER(10, 0), "
+            "NUM_S4 NUMBER(15, 4), "
+            "NUM_PES NUMBER(4, 4), "
+            "NUM_NEG NUMBER(10, 2), "
             "PRIMARY KEY (ID))"
         )
 
@@ -966,6 +1061,10 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
             jstmt.execute("DROP TABLE IF EXISTS dfs.tmp.blob_test")
         except Exception:
             pass
+        try:
+            jstmt.execute("DROP TABLE IF EXISTS dfs.tmp.numeric_combo")
+        except Exception:
+            pass
         self.conn.close()
 
     def _query_table(self, cursor):
@@ -1038,6 +1137,37 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
         self.assertIsNone(result[0][0])
         self.assertEqual(result[1][0], Decimal('99.99'))
         self.assertEqual(result[2][0], Decimal('100.00'))
+
+    def test_numeric_precision_scale_combos(self):
+        """Drill: seed NUMERIC_COMBO via CTAS, then verify round-trip."""
+        jstmt = self.conn.jconn.createStatement()
+        jstmt.execute('DROP TABLE IF EXISTS dfs.tmp.numeric_combo')
+        jstmt.execute(
+            "CREATE TABLE dfs.tmp.numeric_combo AS "
+            "SELECT 1 AS ID, "
+            "CAST(12345.67 AS DECIMAL(10, 2)) AS DEC_S2, "
+            "CAST(12345.6789 AS DECIMAL(15, 4)) AS DEC_S4, "
+            "CAST(987654321012345678 AS DECIMAL(18, 0)) AS DEC_S0, "
+            "CAST(0.12345 AS DECIMAL(5, 5)) AS DEC_PES, "
+            "CAST(99.99 AS DECIMAL(10, 2)) AS NUM_S2, "
+            "CAST(42 AS DECIMAL(10, 0)) AS NUM_S0, "
+            "CAST(12345.6789 AS DECIMAL(15, 4)) AS NUM_S4, "
+            "CAST(0.1234 AS DECIMAL(4, 4)) AS NUM_PES, "
+            "CAST(-99.99 AS DECIMAL(10, 2)) AS NUM_NEG")
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT DEC_S2, DEC_S4, DEC_S0, DEC_PES, "
+                           "NUM_S2, NUM_S0, NUM_S4, NUM_PES, NUM_NEG "
+                           "FROM dfs.tmp.numeric_combo ORDER BY ID")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal('12345.67'))
+        self.assertEqual(result[1], Decimal('12345.6789'))
+        self.assertEqual(result[2], Decimal('987654321012345678'))
+        self.assertEqual(result[3], Decimal('0.12345'))
+        self.assertEqual(result[4], Decimal('99.99'))
+        self.assertEqual(result[5], Decimal('42'))
+        self.assertEqual(result[6], Decimal('12345.6789'))
+        self.assertEqual(result[7], Decimal('0.1234'))
+        self.assertEqual(result[8], Decimal('-99.99'))
 
     def test_execute_different_rowcounts(self):
         """Drill has no INSERT INTO ... VALUES — skip rowcount test."""

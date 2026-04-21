@@ -151,6 +151,23 @@ public abstract class MockConnection implements Connection {
     Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
   }
 
+  public final void mockNullNumericResult(int precision, int scale) throws SQLException {
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for null Numeric)");
+    Mockito.when(mockPreparedStatement.getResultSet()).thenReturn(mockResultSet);
+    Mockito.when(mockResultSet.next()).thenReturn(true);
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    mockGeneralResultSetMetaData(mockMetaData, Types.NUMERIC);
+    Mockito.when(mockMetaData.getPrecision(1)).thenReturn(precision);
+    Mockito.when(mockMetaData.getScale(1)).thenReturn(scale);
+    Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
+
+    Mockito.when(mockResultSet.getObject(1)).thenReturn(null);
+    Mockito.when(mockResultSet.wasNull()).thenReturn(true);
+    Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
+
   public final void mockNumericTypeResult(BigDecimal value, int precision, int scale) throws SQLException {
     PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
     Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
