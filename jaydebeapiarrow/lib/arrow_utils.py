@@ -9,8 +9,11 @@ from pyarrow.cffi import ffi as arrow_c
 def convert_jdbc_rs_to_arrow_iterator(rs, batch_size=1024):
     import jpype.imports
     from org.jaydebeapiarrow.extension import JDBCUtils
-    
-    return JDBCUtils.convertResultSetToIterator(rs, batch_size)
+
+    print(f"[DEBUG convert_jdbc_rs_to_arrow_iterator] rs={rs}, rs.hashCode={rs.hashCode()}, rs.class={rs.getClass().getName()}", file=sys.stderr)
+    it = JDBCUtils.convertResultSetToIterator(rs, batch_size)
+    print(f"[DEBUG convert_jdbc_rs_to_arrow_iterator] iterator={it}, it.hashCode={it.hashCode()}", file=sys.stderr)
+    return it
 
 
 def fetch_next_batch(it):
@@ -27,7 +30,21 @@ def fetch_next_batch(it):
     if it.hasNext():
         try:
             root = it.next()
+            print(f"[DEBUG fetch_next_batch] root={root}, root.hashCode={root.hashCode()}, root.rowCount={root.getRowCount()}, fields={[(f.getName(), f.getFieldType().getType()) for f in root.getSchema().getFields()]}", file=sys.stderr)
         except Exception as e:
+            print(f"[DEBUG fetch_next_batch] Exception from it.next(): type={type(e).__name__}, class={getattr(e, 'getClass', lambda: None)()}, msg={e}", file=sys.stderr)
+            exc_class = e.getClass().getName() if hasattr(e, 'getClass') else str(type(e))
+            print(f"[DEBUG fetch_next_batch] exc_class={exc_class}", file=sys.stderr)
+            # Walk cause chain for debugging
+            cause = e
+            depth = 0
+            while cause is not None:
+                print(f"[DEBUG fetch_next_batch]   cause[{depth}]: {cause}", file=sys.stderr)
+                try:
+                    cause = cause.getCause()
+                except AttributeError:
+                    break
+                depth += 1
             if _is_java_null_pointer_exception(e):
                 return []
             decimal_message = _find_decimal_conversion_message(e)
