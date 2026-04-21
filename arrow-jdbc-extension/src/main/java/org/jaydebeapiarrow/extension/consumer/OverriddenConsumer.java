@@ -50,7 +50,7 @@ public class OverriddenConsumer {
                 int precision = fieldInfo.getPrecision();
                 int scale = fieldInfo.getScale();
                 if (precision <= 0) precision = 38;
-                if (scale <= 0 && precision > 1) scale = Math.min(17, precision);
+                if (scale < 0) scale = 0;
                 return new ArrowType.Decimal(precision, scale, 128);
             default:
                 return JdbcToArrowUtils.getArrowTypeFromJdbcType(fieldInfo, null);
@@ -84,11 +84,14 @@ public class OverriddenConsumer {
                     return TimestampTZConsumer.createConsumer((TimeStampMicroTZVector) vector, columnIndex, nullable, calendar);
                 }
             case Decimal:
+                ArrowType.Decimal decimalType = (ArrowType.Decimal) arrowType;
                 return DecimalConsumer.createConsumer(
                         (DecimalVector) vector, columnIndex, nullable,
                         config.getBigDecimalRoundingMode() != null
                                 ? config.getBigDecimalRoundingMode()
-                                : RoundingMode.HALF_UP);
+                                : RoundingMode.HALF_UP,
+                        decimalType.getScale(),
+                        decimalType.getPrecision());
             default:
                 return JdbcToArrowUtils.getConsumer(arrowType, columnIndex, nullable, vector, config);
         }

@@ -9,7 +9,7 @@ from pyarrow.cffi import ffi as arrow_c
 def convert_jdbc_rs_to_arrow_iterator(rs, batch_size=1024):
     import jpype.imports
     from org.jaydebeapiarrow.extension import JDBCUtils
-    
+
     return JDBCUtils.convertResultSetToIterator(rs, batch_size)
 
 
@@ -18,17 +18,15 @@ def fetch_next_batch(it):
     Fetches the next batch from the ArrowVectorIterator 'it'.
     Returns a list of rows (tuples).
     Returns empty list if iterator is exhausted.
-
-    Some JDBC drivers (e.g. DB2) close the ResultSet after all rows are
-    consumed, causing ArrowVectorIterator.next() to throw a NullPointerException
-    even after hasNext() returned True. We catch that and treat it as
-    end-of-results.
     """
     if it.hasNext():
         try:
             root = it.next()
-        except Exception:
-            return []
+        except Exception as e:
+            decimal_message = _find_decimal_conversion_message(e)
+            if decimal_message:
+                raise RuntimeError(decimal_message) from e
+            raise
         try:
             batch = pa.jvm.record_batch(root).to_pylist()
             rows = [tuple(r.values()) for r in batch]
@@ -36,6 +34,20 @@ def fetch_next_batch(it):
         finally:
             root.clear()
     return []
+
+
+def _find_decimal_conversion_message(exc):
+    current = exc
+    while current is not None:
+        message = str(current)
+        marker = "Could not convert DECIMAL/NUMERIC value"
+        if marker in message:
+            return message[message.find(marker):]
+        try:
+            current = current.getCause()
+        except AttributeError:
+            return None
+    return None
 
 
 def read_rows_from_arrow_iterator(it, nrows=-1):

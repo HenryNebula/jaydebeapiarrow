@@ -24,6 +24,7 @@
 
 import jaydebeapiarrow
 
+import calendar
 import os
 import sys
 import threading
@@ -31,7 +32,7 @@ import threading
 import unittest
 
 from decimal import Decimal
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from collections import namedtuple
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -111,6 +112,7 @@ class IntegrationTestBase(object):
     def tearDown(self):
         with self.conn.cursor() as cursor:
             cursor.execute("drop table ACCOUNT")
+            self._numeric_teardown()
         self.conn.close()
 
     def test_execute_and_fetch_no_data(self):
@@ -301,6 +303,92 @@ class IntegrationTestBase(object):
         value = result[0]
         self.assertEqual(value, memoryview(binary_stuff))
 
+    def test_numeric_types(self):
+        """Test that NUMERIC columns round-trip correctly, including NULL values
+        and edge-case precision/scale values."""
+        create_table = self._numeric_create_table_sql()
+        with self.conn.cursor() as cursor:
+            cursor.execute(create_table)
+            # Insert NULL numeric value
+            cursor.execute(
+                "INSERT INTO NUMERIC_TEST (ID, NUM_COL) VALUES (1, NULL)")
+            # Insert a regular numeric value
+            cursor.execute(
+                "INSERT INTO NUMERIC_TEST (ID, NUM_COL) VALUES (2, 99.99)")
+            # Insert an integer-like numeric value
+            cursor.execute(
+                "INSERT INTO NUMERIC_TEST (ID, NUM_COL) VALUES (3, 100.00)")
+            # Read back only the numeric column to avoid ID type differences
+            cursor.execute("SELECT NUM_COL FROM NUMERIC_TEST ORDER BY ID")
+            result = cursor.fetchall()
+        self.assertEqual(len(result), 3)
+        self.assertIsNone(result[0][0])       # NULL
+        self.assertEqual(result[1][0], Decimal('99.99'))
+        self.assertEqual(result[2][0], Decimal('100.00'))
+
+    def test_numeric_precision_scale_combos(self):
+        """Test various DECIMAL/NUMERIC precision/scale combinations."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(self._numeric_combo_create_sql())
+            cursor.execute(self._numeric_combo_insert_sql())
+            cursor.execute("SELECT DEC_S2, DEC_S4, DEC_S0, DEC_PES, "
+                           "NUM_S2, NUM_S0, NUM_S4, NUM_PES, NUM_NEG "
+                           "FROM NUMERIC_COMBO ORDER BY ID")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal('12345.67'))          # DECIMAL(10, 2)
+        self.assertEqual(result[1], Decimal('12345.6789'))        # DECIMAL(15, 4)
+        self.assertEqual(result[2], Decimal('987654321012345678')) # DECIMAL(18, 0)
+        self.assertEqual(result[3], Decimal('0.12345'))           # DECIMAL(5, 5)
+        self.assertEqual(result[4], Decimal('99.99'))             # NUMERIC(10, 2)
+        self.assertEqual(result[5], Decimal('42'))                # NUMERIC(10, 0)
+        self.assertEqual(result[6], Decimal('12345.6789'))        # NUMERIC(15, 4)
+        self.assertEqual(result[7], Decimal('0.1234'))            # NUMERIC(4, 4)
+        self.assertEqual(result[8], Decimal('-99.99'))            # NUMERIC(10, 2)
+
+    def _numeric_combo_create_sql(self):
+        return (
+            "CREATE TABLE NUMERIC_COMBO ("
+            "ID INTEGER NOT NULL, "
+            "DEC_S2 DECIMAL(10, 2), "
+            "DEC_S4 DECIMAL(15, 4), "
+            "DEC_S0 DECIMAL(18, 0), "
+            "DEC_PES DECIMAL(5, 5), "
+            "NUM_S2 NUMERIC(10, 2), "
+            "NUM_S0 NUMERIC(10, 0), "
+            "NUM_S4 NUMERIC(15, 4), "
+            "NUM_PES NUMERIC(4, 4), "
+            "NUM_NEG NUMERIC(10, 2), "
+            "PRIMARY KEY (ID))"
+        )
+
+    def _numeric_combo_insert_sql(self):
+        return (
+            "INSERT INTO NUMERIC_COMBO "
+            "(ID, DEC_S2, DEC_S4, DEC_S0, DEC_PES, "
+            "NUM_S2, NUM_S0, NUM_S4, NUM_PES, NUM_NEG) "
+            "VALUES (1, 12345.67, 12345.6789, 987654321012345678, 0.12345, "
+            "99.99, 42, 12345.6789, 0.1234, -99.99)"
+        )
+
+    def _numeric_create_table_sql(self):
+        return (
+            "CREATE TABLE NUMERIC_TEST ("
+            "ID INTEGER NOT NULL, "
+            "NUM_COL NUMERIC(10, 2), "
+            "PRIMARY KEY (ID))"
+        )
+
+    def _numeric_teardown(self):
+        with self.conn.cursor() as cursor:
+            try:
+                cursor.execute("DROP TABLE NUMERIC_TEST")
+            except Exception:
+                pass
+            try:
+                cursor.execute("DROP TABLE NUMERIC_COMBO")
+            except Exception:
+                pass
+
 class SqliteTestBase(IntegrationTestBase):
 
     def setUpSql(self):
@@ -310,6 +398,15 @@ class SqliteTestBase(IntegrationTestBase):
 class SqlitePyTest(SqliteTestBase, unittest.TestCase):
 
     JDBC_SUPPORT_TEMPORAL_TYPE = True
+
+    def _numeric_create_table_sql(self):
+        """Use DECIMAL so sqlite3's detect_types converter fires."""
+        return (
+            "CREATE TABLE NUMERIC_TEST ("
+            "ID INTEGER NOT NULL, "
+            "NUM_COL DECIMAL(10, 2), "
+            "PRIMARY KEY (ID))"
+        )
 
     class ConnectionWithClosing:
         def __init__(self, conn):
@@ -327,7 +424,10 @@ class SqlitePyTest(SqliteTestBase, unittest.TestCase):
         return sqlite3, self.ConnectionWithClosing(sqlite3.connect(':memory:', detect_types=sqlite3.PARSE_DECLTYPES))
 
     def test_execute_type_time(self):
-        """Time type not supported by PySqlite"""
+        self.skipTest("Time type not supported by PySqlite")
+
+    def test_numeric_precision_scale_combos(self):
+        self.skipTest("SQLite type affinity makes NUMERIC/DECIMAL precision unreliable")
 
 class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
 
@@ -470,6 +570,15 @@ class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
         )
         self.assertEqual(result, exp)
 
+    def _numeric_create_table_sql(self):
+        """SQLite treats NUMERIC as an affinity type — use DECIMAL instead."""
+        return (
+            "CREATE TABLE NUMERIC_TEST ("
+            "ID INTEGER NOT NULL, "
+            "NUM_COL DECIMAL, "
+            "PRIMARY KEY (ID))"
+        )
+
 class HsqldbTest(IntegrationTestBase, unittest.TestCase):
 
     def connect(self):
@@ -506,7 +615,7 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
         try:
             db, conn = jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args)
         except jpype.JException:
-            self.skipTest("Can not connect with PostgreSQL. Please check if the instance is up and running.")
+            self.fail("Can not connect with PostgreSQL. Please check if the instance is up and running.")
         else:
             return db, conn
 
@@ -589,7 +698,7 @@ class MySQLTest(IntegrationTestBase, unittest.TestCase):
         try:
             db, conn = jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args)
         except jpype.JException as e:
-            self.skipTest("Can not connect with MySQL. Please check if the instance is up and running.")
+            self.fail("Can not connect with MySQL. Please check if the instance is up and running.")
         else:
             return db, conn
 
@@ -618,7 +727,7 @@ class MSSQLTest(IntegrationTestBase, unittest.TestCase):
         try:
             db, conn = jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args)
         except jpype.JException:
-            self.skipTest("Can not connect with MS SQL Server. Please check if the instance is up and running.")
+            self.fail("Can not connect with MS SQL Server. Please check if the instance is up and running.")
         else:
             return db, conn
 
@@ -654,7 +763,7 @@ class TrinoTest(IntegrationTestBase, unittest.TestCase):
         try:
             db, conn = jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args)
         except jpype.JException:
-            self.skipTest("Can not connect with Trino. Please check if the instance is up and running.")
+            self.fail("Can not connect with Trino. Please check if the instance is up and running.")
         else:
             return db, conn
 
@@ -665,11 +774,61 @@ class TrinoTest(IntegrationTestBase, unittest.TestCase):
     def tearDown(self):
         with self.conn.cursor() as cursor:
             cursor.execute("DROP TABLE IF EXISTS ACCOUNT")
+            cursor.execute("DROP TABLE IF EXISTS NUMERIC_TEST")
+            cursor.execute("DROP TABLE IF EXISTS NUMERIC_COMBO")
         self.conn.close()
 
     def test_execute_reset_description_without_execute_result(self):
         """Trino memory connector does not support DELETE."""
         self.skipTest("Trino memory connector does not support modifying table rows")
+
+    def test_numeric_types(self):
+        """Trino memory connector does not support INSERT INTO ... VALUES — use CTAS instead."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS NUMERIC_TEST")
+            cursor.execute(
+                "CREATE TABLE NUMERIC_TEST AS "
+                "SELECT 1 AS ID, CAST(NULL AS DECIMAL(10, 2)) AS NUM_COL "
+                "UNION ALL "
+                "SELECT 2, CAST(99.99 AS DECIMAL(10, 2)) "
+                "UNION ALL "
+                "SELECT 3, CAST(100.00 AS DECIMAL(10, 2))")
+            cursor.execute("SELECT NUM_COL FROM NUMERIC_TEST ORDER BY ID")
+            result = cursor.fetchall()
+        self.assertEqual(len(result), 3)
+        self.assertIsNone(result[0][0])
+        self.assertEqual(result[1][0], Decimal('99.99'))
+        self.assertEqual(result[2][0], Decimal('100.00'))
+
+    def test_numeric_precision_scale_combos(self):
+        """Trino memory connector does not support INSERT — use CTAS instead."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS NUMERIC_COMBO")
+            cursor.execute(
+                "CREATE TABLE NUMERIC_COMBO AS "
+                "SELECT 1 AS ID, "
+                "CAST(12345.67 AS DECIMAL(10, 2)) AS DEC_S2, "
+                "CAST(12345.6789 AS DECIMAL(15, 4)) AS DEC_S4, "
+                "CAST(987654321012345678 AS DECIMAL(18, 0)) AS DEC_S0, "
+                "CAST(0.12345 AS DECIMAL(5, 5)) AS DEC_PES, "
+                "CAST(99.99 AS DECIMAL(10, 2)) AS NUM_S2, "
+                "CAST(42 AS DECIMAL(10, 0)) AS NUM_S0, "
+                "CAST(12345.6789 AS DECIMAL(15, 4)) AS NUM_S4, "
+                "CAST(0.1234 AS DECIMAL(4, 4)) AS NUM_PES, "
+                "CAST(-99.99 AS DECIMAL(10, 2)) AS NUM_NEG")
+            cursor.execute("SELECT DEC_S2, DEC_S4, DEC_S0, DEC_PES, "
+                           "NUM_S2, NUM_S0, NUM_S4, NUM_PES, NUM_NEG "
+                           "FROM NUMERIC_COMBO ORDER BY ID")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal('12345.67'))
+        self.assertEqual(result[1], Decimal('12345.6789'))
+        self.assertEqual(result[2], Decimal('987654321012345678'))
+        self.assertEqual(result[3], Decimal('0.12345'))
+        self.assertEqual(result[4], Decimal('99.99'))
+        self.assertEqual(result[5], Decimal('42'))
+        self.assertEqual(result[6], Decimal('12345.6789'))
+        self.assertEqual(result[7], Decimal('0.1234'))
+        self.assertEqual(result[8], Decimal('-99.99'))
 
 
 class OracleTest(IntegrationTestBase, unittest.TestCase):
@@ -692,7 +851,7 @@ class OracleTest(IntegrationTestBase, unittest.TestCase):
         try:
             db, conn = jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args)
         except jpype.JException:
-            self.skipTest("Can not connect with Oracle. Please check if the instance is up and running.")
+            self.fail("Can not connect with Oracle. Please check if the instance is up and running.")
         else:
             return db, conn
 
@@ -762,6 +921,31 @@ class OracleTest(IntegrationTestBase, unittest.TestCase):
         )
         self.assertEqual(result, exp)
 
+    def _numeric_create_table_sql(self):
+        """Oracle uses NUMBER instead of NUMERIC/DECIMAL."""
+        return (
+            "CREATE TABLE NUMERIC_TEST ("
+            "ID INTEGER NOT NULL, "
+            "NUM_COL NUMBER(10, 2), "
+            "PRIMARY KEY (ID))"
+        )
+
+    def _numeric_combo_create_sql(self):
+        return (
+            "CREATE TABLE NUMERIC_COMBO ("
+            "ID INTEGER NOT NULL, "
+            "DEC_S2 NUMBER(10, 2), "
+            "DEC_S4 NUMBER(15, 4), "
+            "DEC_S0 NUMBER(18, 0), "
+            "DEC_PES NUMBER(5, 5), "
+            "NUM_S2 NUMBER(10, 2), "
+            "NUM_S0 NUMBER(10, 0), "
+            "NUM_S4 NUMBER(15, 4), "
+            "NUM_PES NUMBER(4, 4), "
+            "NUM_NEG NUMBER(10, 2), "
+            "PRIMARY KEY (ID))"
+        )
+
 
 class DB2Test(IntegrationTestBase, unittest.TestCase):
 
@@ -783,7 +967,7 @@ class DB2Test(IntegrationTestBase, unittest.TestCase):
         try:
             db, conn = jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args)
         except jpype.JException:
-            self.skipTest("Can not connect with DB2. Please check if the instance is up and running.")
+            self.fail("Can not connect with DB2. Please check if the instance is up and running.")
         else:
             return db, conn
 
@@ -841,16 +1025,46 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
         try:
             db, conn = jaydebeapiarrow, jaydebeapiarrow.connect(driver, url, driver_args)
         except jpype.JException:
-            self.skipTest("Can not connect with Drill. Please check if the instance is up and running.")
+            self.fail("Can not connect with Drill. Please check if the instance is up and running.")
         else:
             return db, conn
 
+    def _cast_datetime(self, datetime_str, fmt=r'%Y-%m-%d %H:%M:%S'):
+        """Drill stores TIMESTAMP as UTC and shifts by JVM timezone on read."""
+        dt = super()._cast_datetime(datetime_str, fmt)
+        import jpype
+        tz = jpype.JClass('java.util.TimeZone').getDefault()
+        epoch_ms = int(calendar.timegm(dt.timetuple())) * 1000
+        offset_ms = tz.getOffset(epoch_ms)
+        return dt + timedelta(milliseconds=-offset_ms)
+
     def setUpSql(self):
-        self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_drill.sql'))
+        jstmt = self.conn.jconn.createStatement()
+        try:
+            jstmt.execute("DROP TABLE IF EXISTS dfs.tmp.account")
+        except Exception:
+            pass
+        sql = open(os.path.join(_THIS_DIR, 'data', 'create_drill.sql')).read().strip().rstrip(';')
+        jstmt.execute(sql)
 
     def tearDown(self):
-        with self.conn.cursor() as cursor:
-            cursor.execute("DROP TABLE IF EXISTS dfs.tmp.account")
+        jstmt = self.conn.jconn.createStatement()
+        try:
+            jstmt.execute("DROP TABLE IF EXISTS dfs.tmp.account")
+        except Exception:
+            pass
+        try:
+            jstmt.execute("DROP TABLE IF EXISTS dfs.tmp.numeric_test")
+        except Exception:
+            pass
+        try:
+            jstmt.execute("DROP TABLE IF EXISTS dfs.tmp.blob_test")
+        except Exception:
+            pass
+        try:
+            jstmt.execute("DROP TABLE IF EXISTS dfs.tmp.numeric_combo")
+        except Exception:
+            pass
         self.conn.close()
 
     def _query_table(self, cursor):
@@ -862,16 +1076,98 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
         self.skipTest("Drill does not support INSERT INTO ... VALUES")
 
     def test_execute_types(self):
-        """Drill has no INSERT INTO ... VALUES — skip types test."""
-        self.skipTest("Drill does not support INSERT INTO ... VALUES")
+        """Drill preserves DECIMAL scale; data seeded via CTAS, no INSERT."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING, "
+                "DBL_COL, OPENED_AT, VALID, PRODUCT_NAME "
+                "FROM dfs.tmp.account WHERE ACCOUNT_NO = 20")
+            result = cursor.fetchone()
+        exp = (
+            self._cast_datetime('2010-01-26 14:31:59', r'%Y-%m-%d %H:%M:%S'),
+            20, Decimal('1.20'), Decimal('10.00'), 3.5,
+            self._cast_date('2024-01-15', r'%Y-%m-%d'),
+            True, 'Savings account'
+        )
+        self.assertEqual(result, exp)
 
     def test_execute_type_time(self):
-        """Drill has no INSERT INTO ... VALUES — skip time test."""
-        self.skipTest("Drill does not support INSERT INTO ... VALUES")
+        """Drill: TIME data seeded via CTAS, no INSERT needed."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT ACCOUNT_ID, ACCOUNT_NO, BALANCE, OPENED_AT_TIME "
+                "FROM dfs.tmp.account WHERE ACCOUNT_NO = 20")
+            result = cursor.fetchone()
+        exp = (
+            self._cast_datetime('2010-01-26 14:31:59', r'%Y-%m-%d %H:%M:%S'),
+            20, Decimal('1.20'),
+            self._cast_time('13:59:59', r'%H:%M:%S')
+        )
+        self.assertEqual(result, exp)
 
     def test_execute_type_blob(self):
-        """Drill has no INSERT INTO ... VALUES — skip blob test."""
-        self.skipTest("Drill does not support INSERT INTO ... VALUES")
+        """Drill: seed VARBINARY via separate CTAS, verify read path."""
+        jstmt = self.conn.jconn.createStatement()
+        jstmt.execute('DROP TABLE IF EXISTS dfs.tmp.blob_test')
+        jstmt.execute(
+            "CREATE TABLE dfs.tmp.blob_test AS "
+            "SELECT CAST('abcdef' AS VARBINARY) AS STUFF FROM (VALUES(1))")
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT STUFF FROM dfs.tmp.blob_test")
+            result = cursor.fetchone()
+        binary_stuff = b'abcdef'
+        self.assertEqual(result[0], memoryview(binary_stuff))
+
+    def test_numeric_types(self):
+        """Drill: seed NUMERIC_TEST via CTAS, then verify round-trip."""
+        jstmt = self.conn.jconn.createStatement()
+        jstmt.execute('DROP TABLE IF EXISTS dfs.tmp.numeric_test')
+        jstmt.execute(
+            "CREATE TABLE dfs.tmp.numeric_test AS "
+            "SELECT 1 AS ID, CAST(NULL AS DECIMAL(10, 2)) AS NUM_COL "
+            "UNION ALL "
+            "SELECT 2, CAST(99.99 AS DECIMAL(10, 2)) "
+            "UNION ALL "
+            "SELECT 3, CAST(100.00 AS DECIMAL(10, 2))")
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT NUM_COL FROM dfs.tmp.numeric_test ORDER BY ID")
+            result = cursor.fetchall()
+        self.assertEqual(len(result), 3)
+        self.assertIsNone(result[0][0])
+        self.assertEqual(result[1][0], Decimal('99.99'))
+        self.assertEqual(result[2][0], Decimal('100.00'))
+
+    def test_numeric_precision_scale_combos(self):
+        """Drill: seed NUMERIC_COMBO via CTAS, then verify round-trip."""
+        jstmt = self.conn.jconn.createStatement()
+        jstmt.execute('DROP TABLE IF EXISTS dfs.tmp.numeric_combo')
+        jstmt.execute(
+            "CREATE TABLE dfs.tmp.numeric_combo AS "
+            "SELECT 1 AS ID, "
+            "CAST(12345.67 AS DECIMAL(10, 2)) AS DEC_S2, "
+            "CAST(12345.6789 AS DECIMAL(15, 4)) AS DEC_S4, "
+            "CAST(987654321012345678 AS DECIMAL(18, 0)) AS DEC_S0, "
+            "CAST(0.12345 AS DECIMAL(5, 5)) AS DEC_PES, "
+            "CAST(99.99 AS DECIMAL(10, 2)) AS NUM_S2, "
+            "CAST(42 AS DECIMAL(10, 0)) AS NUM_S0, "
+            "CAST(12345.6789 AS DECIMAL(15, 4)) AS NUM_S4, "
+            "CAST(0.1234 AS DECIMAL(4, 4)) AS NUM_PES, "
+            "CAST(-99.99 AS DECIMAL(10, 2)) AS NUM_NEG")
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT DEC_S2, DEC_S4, DEC_S0, DEC_PES, "
+                           "NUM_S2, NUM_S0, NUM_S4, NUM_PES, NUM_NEG "
+                           "FROM dfs.tmp.numeric_combo ORDER BY ID")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal('12345.67'))
+        self.assertEqual(result[1], Decimal('12345.6789'))
+        self.assertEqual(result[2], Decimal('987654321012345678'))
+        self.assertEqual(result[3], Decimal('0.12345'))
+        self.assertEqual(result[4], Decimal('99.99'))
+        self.assertEqual(result[5], Decimal('42'))
+        self.assertEqual(result[6], Decimal('12345.6789'))
+        self.assertEqual(result[7], Decimal('0.1234'))
+        self.assertEqual(result[8], Decimal('-99.99'))
 
     def test_execute_different_rowcounts(self):
         """Drill has no INSERT INTO ... VALUES — skip rowcount test."""
@@ -887,7 +1183,7 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
     def test_execute_and_fetch(self):
         with self.conn.cursor() as cursor:
             cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING "
-                           "from dfs.tmp.account")
+                           "from dfs.tmp.account WHERE ACCOUNT_NO <= 19")
             result = cursor.fetchall()
         self.assertEqual(result, [
             (
@@ -895,13 +1191,13 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
             18, Decimal('12.40'), None),
             (
             self._cast_datetime('2009-09-11 14:15:22.123', r'%Y-%m-%d %H:%M:%S.%f'),
-            19, Decimal('12.90'), Decimal('1'))
+            19, Decimal('12.90'), Decimal('1.00'))
         ])
 
     def test_execute_and_fetchone(self):
         with self.conn.cursor() as cursor:
             cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING "
-                           "from dfs.tmp.account order by ACCOUNT_NO")
+                           "from dfs.tmp.account WHERE ACCOUNT_NO <= 19 order by ACCOUNT_NO")
             result = cursor.fetchone()
         self.assertEqual(result, (
             self._cast_datetime('2009-09-10 14:15:22.123', r'%Y-%m-%d %H:%M:%S.%f'),
@@ -911,7 +1207,7 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
     def test_execute_and_fetchone_consecutive(self):
         with self.conn.cursor() as cursor:
             cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING "
-                           "from dfs.tmp.account order by ACCOUNT_NO")
+                           "from dfs.tmp.account WHERE ACCOUNT_NO <= 19 order by ACCOUNT_NO")
             result1 = cursor.fetchone()
             result2 = cursor.fetchone()
 
@@ -921,12 +1217,30 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
 
         self.assertEqual(result2, (
             self._cast_datetime('2009-09-11 14:15:22.123', r'%Y-%m-%d %H:%M:%S.%f'),
-            19, Decimal('12.90'), Decimal('1')))
+            19, Decimal('12.90'), Decimal('1.00')))
+
+    def test_execute_and_fetch_no_data(self):
+        with self.conn.cursor() as cursor:
+            stmt = "select * from dfs.tmp.account where ACCOUNT_ID is null"
+            cursor.execute(stmt)
+            result = cursor.fetchall()
+        self.assertEqual(result, [])
+
+    def test_execute_and_fetch_parameter(self):
+        """Drill does not support JDBC parameterized queries."""
+        self.skipTest("Drill does not support prepared statement parameters")
+
+    def test_execute_and_fetchone_after_end(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("select * from dfs.tmp.account where ACCOUNT_NO = 18")
+            cursor.fetchone()
+            result = cursor.fetchone()
+        self.assertIsNone(result)
 
     def test_execute_and_fetchmany(self):
         with self.conn.cursor() as cursor:
             cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING "
-                           "from dfs.tmp.account order by ACCOUNT_NO")
+                           "from dfs.tmp.account WHERE ACCOUNT_NO <= 19 order by ACCOUNT_NO")
             result = cursor.fetchmany()
         self.assertEqual(result, [
             (

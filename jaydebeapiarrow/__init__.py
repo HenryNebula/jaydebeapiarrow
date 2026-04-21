@@ -596,7 +596,7 @@ class Cursor(object):
             return self._iter
         if not self._rs:
             raise Error()
-        # Use a reasonable batch size. 
+        # Use a reasonable batch size.
         # For small reads (fetchone), this might be overhead, but it's safe.
         # For large reads (fetchall), this is efficient.
         # Using arraysize or a default.
@@ -607,16 +607,16 @@ class Cursor(object):
     def fetchone(self):
         if not self._rs:
             raise Error()
-        
+
         if self._buffer:
             return self._buffer.pop(0)
-        
+
         it = self._get_iter()
         rows = fetch_next_batch(it)
         if rows:
             self._buffer.extend(rows)
             return self._buffer.pop(0)
-        
+
         return None
 
     def fetchmany(self, size=None):

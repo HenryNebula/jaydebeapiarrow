@@ -90,6 +90,366 @@ class MockTest(unittest.TestCase):
             result = cursor.fetchone()
         self.assertEqual(result[0], Decimal("1234.5"))
 
+    def test_decimal_null_value(self):
+        """SQL NULL in a DECIMAL column should return None, not crash or return 0."""
+        self.conn.jconn.mockNullDecimalResult(10, 2)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertIsNone(result[0])
+
+    def test_decimal_high_precision_overflow(self):
+        """BigDecimal with scale > vector scale is safely rounded with HALF_UP
+        when the data exceeds the vector's configured scale."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        # Value has scale 20, but vector is configured with scale 2.
+        # HALF_UP rounds to 2 decimal places.
+        value = BigDecimal("123456789012345678.12345678901234567890")
+        self.conn.jconn.mockHighPrecisionDecimalResult(value, 38, 2)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("123456789012345678.12"))
+
+    def test_decimal_true_precision_overflow_has_actionable_error(self):
+        """Values that cannot fit Arrow DECIMAL precision should fail loudly
+        instead of being returned as NULL."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        value = BigDecimal("123456789012345678901234567890123456789")
+        self.conn.jconn.mockHighPrecisionDecimalResult(value, 38, 0)
+
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            with self.assertRaises(Exception) as cm:
+                cursor.fetchone()
+
+        message = str(cm.exception)
+        self.assertIn("Could not convert DECIMAL/NUMERIC value", message)
+        self.assertIn("Arrow DECIMAL(38, 0)", message)
+        self.assertIn("Cast the column in SQL", message)
+        self.assertIn("CAST(column AS DECIMAL(38, 0))", message)
+        self.assertIn("cast it to VARCHAR", message)
+
+    def test_decimal_cast_shaped_value_can_be_consumed(self):
+        """After SQL casts constrain precision and scale to an Arrow-compatible
+        shape, values should be consumed as Decimal."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        value = BigDecimal("123456789012345678901234567890123456.79")
+        self.conn.jconn.mockHighPrecisionDecimalResult(value, 38, 2)
+
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+
+        self.assertEqual(result[0], Decimal("123456789012345678901234567890123456.79"))
+
+    def test_decimal_integer_from_getObject(self):
+        """Drivers like Oracle return BigDecimal with scale 0 for integer-like
+        NUMERIC columns (e.g., NUMBER(10)). The vector now preserves the
+        metadata's scale instead of inflating it, so the value round-trips
+        without precision overflow."""
+        self.conn.jconn.mockIntegerDecimalResult(42, 10, 0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("42"))
+
+    def test_numeric_type_mapping(self):
+        """Types.NUMERIC should follow the same DECIMAL code path in
+        ExplicitTypeMapper and DecimalConsumer."""
+        import jpype
+        self.conn.jconn.mockNumericTypeResult(
+            jpype.JClass("java.math.BigDecimal")("99.99"), 10, 2)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("99.99"))
+
+    # -- DECIMAL precision / scale combos --
+
+    def test_decimal_scale_two(self):
+        """DECIMAL(10, 2) — common financial precision."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockHighPrecisionDecimalResult(
+            BigDecimal("12345.67"), 10, 2)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("12345.67"))
+
+    def test_decimal_scale_four(self):
+        """DECIMAL(15, 4) — higher fractional precision."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockHighPrecisionDecimalResult(
+            BigDecimal("12345.6789"), 15, 4)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("12345.6789"))
+
+    def test_decimal_scale_eight(self):
+        """DECIMAL(18, 8) — many fractional digits."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockHighPrecisionDecimalResult(
+            BigDecimal("0.00000001"), 18, 8)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("0.00000001"))
+
+    def test_decimal_precision_equals_scale(self):
+        """DECIMAL(4, 4) — precision equals scale, only fractional digits."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockHighPrecisionDecimalResult(
+            BigDecimal("0.1234"), 4, 4)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("0.1234"))
+
+    def test_decimal_small_precision(self):
+        """DECIMAL(5, 2) — tight precision budget."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockHighPrecisionDecimalResult(
+            BigDecimal("123.45"), 5, 2)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("123.45"))
+
+    def test_decimal_large_precision_small_scale(self):
+        """DECIMAL(30, 2) — wide integer part, minimal fraction."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockHighPrecisionDecimalResult(
+            BigDecimal("12345678901234567890123456.12"), 30, 2)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("12345678901234567890123456.12"))
+
+    def test_decimal_negative_value(self):
+        """DECIMAL(10, 2) — negative value round-trip."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockHighPrecisionDecimalResult(
+            BigDecimal("-99.99"), 10, 2)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("-99.99"))
+
+    def test_decimal_scale_zero_high_precision(self):
+        """DECIMAL(18, 0) — large integer stored as decimal."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockHighPrecisionDecimalResult(
+            BigDecimal("123456789012345678"), 18, 0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("123456789012345678"))
+
+    def test_decimal_max_arrow_scale(self):
+        """DECIMAL(38, 17) — max scale Arrow supports, value uses all digits."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockHighPrecisionDecimalResult(
+            BigDecimal("12345678901234567.12345678901234567"), 38, 17)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("12345678901234567.12345678901234567"))
+
+    def test_decimal_scale_one(self):
+        """DECIMAL(10, 1) — single fractional digit."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockHighPrecisionDecimalResult(
+            BigDecimal("1.0"), 10, 1)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("1.0"))
+
+    def test_decimal_very_small_negative(self):
+        """DECIMAL(10, 6) — very small negative value."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockHighPrecisionDecimalResult(
+            BigDecimal("-0.000001"), 10, 6)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("-0.000001"))
+
+    # -- NUMERIC precision / scale combos --
+
+    def test_numeric_scale_zero(self):
+        """NUMERIC(10, 0) — integer-like NUMERIC."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockNumericTypeResult(
+            BigDecimal("12345"), 10, 0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("12345"))
+
+    def test_numeric_scale_two(self):
+        """NUMERIC(10, 2) — standard monetary NUMERIC."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockNumericTypeResult(
+            BigDecimal("99.99"), 10, 2)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("99.99"))
+
+    def test_numeric_scale_four(self):
+        """NUMERIC(15, 4) — higher fractional precision."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockNumericTypeResult(
+            BigDecimal("12345.6789"), 15, 4)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("12345.6789"))
+
+    def test_numeric_scale_eight(self):
+        """NUMERIC(18, 8) — many fractional digits."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockNumericTypeResult(
+            BigDecimal("0.00000001"), 18, 8)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("0.00000001"))
+
+    def test_numeric_precision_equals_scale(self):
+        """NUMERIC(4, 4) — only fractional digits."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockNumericTypeResult(
+            BigDecimal("0.1234"), 4, 4)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("0.1234"))
+
+    def test_numeric_negative_value(self):
+        """NUMERIC(10, 2) — negative value."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockNumericTypeResult(
+            BigDecimal("-99.99"), 10, 2)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("-99.99"))
+
+    def test_numeric_null_value(self):
+        """SQL NULL in a NUMERIC column should return None."""
+        self.conn.jconn.mockNullNumericResult(10, 2)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertIsNone(result[0])
+
+    def test_numeric_integer_from_getObject(self):
+        """NUMERIC(10, 0) with integer-like BigDecimal (e.g. PostgreSQL NUMERIC)."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockNumericTypeResult(
+            BigDecimal("42"), 10, 0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("42"))
+
+    def test_numeric_high_precision_overflow(self):
+        """NUMERIC BigDecimal with scale > vector scale is safely rounded."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        value = BigDecimal("123456789012345678.12345678901234567890")
+        self.conn.jconn.mockNumericTypeResult(value, 38, 2)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("123456789012345678.12"))
+
+    def test_numeric_true_precision_overflow_has_actionable_error(self):
+        """NUMERIC values exceeding Arrow DECIMAL(38, 0) should fail with actionable error."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        value = BigDecimal("123456789012345678901234567890123456789")
+        self.conn.jconn.mockNumericTypeResult(value, 38, 0)
+
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            with self.assertRaises(Exception) as cm:
+                cursor.fetchone()
+
+        message = str(cm.exception)
+        self.assertIn("Could not convert DECIMAL/NUMERIC value", message)
+        self.assertIn("Arrow DECIMAL(38, 0)", message)
+        self.assertIn("Cast the column in SQL", message)
+
+    def test_numeric_large_precision_small_scale(self):
+        """NUMERIC(30, 2) — wide integer part, minimal fraction."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockNumericTypeResult(
+            BigDecimal("12345678901234567890123456.12"), 30, 2)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("12345678901234567890123456.12"))
+
+    def test_numeric_max_arrow_scale(self):
+        """NUMERIC(38, 17) — max scale Arrow supports."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockNumericTypeResult(
+            BigDecimal("12345678901234567.12345678901234567"), 38, 17)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("12345678901234567.12345678901234567"))
+
+    def test_numeric_scale_one(self):
+        """NUMERIC(10, 1) — single fractional digit."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockNumericTypeResult(
+            BigDecimal("1.0"), 10, 1)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("1.0"))
+
+    def test_numeric_very_small_negative(self):
+        """NUMERIC(10, 6) — very small negative value."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockNumericTypeResult(
+            BigDecimal("-0.000001"), 10, 6)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("-0.000001"))
+
     def test_sql_exception_on_execute(self):
         self.conn.jconn.mockExceptionOnExecute("java.sql.SQLException", "expected")
         with self.conn.cursor() as cursor:
