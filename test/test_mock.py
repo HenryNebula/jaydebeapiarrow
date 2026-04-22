@@ -672,6 +672,45 @@ class MockTest(unittest.TestCase):
             with self.assertRaises(jaydebeapiarrow.NotSupportedError):
                 cursor.execute("dummy stmt", ([1, 2, 3],))
 
+    # --- Binary data round-trip tests ---
+
+    def test_binary_non_utf8_bytes_preserved(self):
+        """Binary data containing non-UTF-8 bytes must round-trip without loss.
+        Verifies the fix for legacy issue baztian/jaydebeapi#147 where binary
+        data was incorrectly decoded as UTF-8 strings."""
+        import jpype
+        test_data = bytes([0x00, 0x01, 0x02, 0x80, 0xff, 0xfe])
+        java_bytes = jpype.JArray(jpype.JByte)(
+            [b - 256 if b > 127 else b for b in test_data])
+        self.conn.jconn.mockBinaryResult(java_bytes)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertIsInstance(result[0], bytes)
+        self.assertEqual(result[0], test_data)
+
+    def test_binary_all_byte_values(self):
+        """All 256 byte values should round-trip correctly."""
+        import jpype
+        test_data = bytes(range(256))
+        java_bytes = jpype.JArray(jpype.JByte)(
+            [b - 256 if b > 127 else b for b in test_data])
+        self.conn.jconn.mockBinaryResult(java_bytes)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], test_data)
+
+    def test_binary_empty(self):
+        """Empty binary data should round-trip correctly."""
+        import jpype
+        java_bytes = jpype.JArray(jpype.JByte)(0)
+        self.conn.jconn.mockBinaryResult(java_bytes)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], b'')
+
     # --- DBAPITypeObject mapping tests ---
 
     def test_dbapi_type_other_maps_to_string(self):
