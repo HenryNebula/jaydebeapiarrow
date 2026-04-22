@@ -604,6 +604,10 @@ class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
         )
         self.assertEqual(result, exp)
 
+    def test_timestamp_ms_leading_zeros(self):
+        """SQLite Xerial truncates microseconds — skip."""
+        self.skipTest("SQLite Xerial truncates microseconds")
+
     def _numeric_create_table_sql(self):
         """SQLite treats NUMERIC as an affinity type — use DECIMAL instead."""
         return (
