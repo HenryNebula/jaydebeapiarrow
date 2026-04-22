@@ -35,6 +35,10 @@ class MockTest(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
 
+    # JDBC types not supported by the Arrow data path (no Arrow type mapping)
+    _ARROW_UNSUPPORTED_TYPES = {'OTHER', 'NCLOB', 'SQLXML', 'ROWID', 'ARRAY',
+                                'TIME_WITH_TIMEZONE', 'TIMESTAMP_WITH_TIMEZONE'}
+
     def test_all_db_api_type_objects_have_valid_mapping(self):
         extra_type_mappings = {
             'DATE': 'getDate',
@@ -51,6 +55,8 @@ class MockTest(unittest.TestCase):
         for db_api_type in jaydebeapiarrow.__dict__.values():
             if isinstance(db_api_type, jaydebeapiarrow.DBAPITypeObject):
                 for jsql_type_name in db_api_type.values:
+                    if jsql_type_name in self._ARROW_UNSUPPORTED_TYPES:
+                        continue
                     self.conn.jconn.mockType(jsql_type_name)
                     with self.conn.cursor() as cursor:
                         cursor.execute("dummy stmt")
@@ -518,3 +524,156 @@ class MockTest(unittest.TestCase):
                                        'jdbc:jaydebeapi://dummyurl') as conn:
             self.assertEqual(conn._closed, False)
         self.assertEqual(conn._closed, True)
+
+    # --- _to_java() parameter binding tests ---
+
+    def test_to_java_none(self):
+        """None should pass through as Java null."""
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", (None,))
+        captured = self.conn.jconn.getCapturedSetObjectArgs()
+        self.assertEqual(len(captured), 1)
+        self.assertIsNone(captured[0][1])
+
+    def test_to_java_bool(self):
+        """bool should pass through unchanged."""
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", (True,))
+        captured = self.conn.jconn.getCapturedSetObjectArgs()
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0][1], True)
+
+    def test_to_java_bytes(self):
+        """bytes should convert to Java byte[] array."""
+        import jpype
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", (b'\x00\x01\x02',))
+        captured = self.conn.jconn.getCapturedSetObjectArgs()
+        self.assertEqual(len(captured), 1)
+        self.assertIsInstance(captured[0][1], jpype.JArray(jpype.JByte))
+
+    def test_to_java_bytearray(self):
+        """bytearray should convert to Java byte[] array."""
+        import jpype
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", (bytearray(b'\x03\x04\x05'),))
+        captured = self.conn.jconn.getCapturedSetObjectArgs()
+        self.assertEqual(len(captured), 1)
+        self.assertIsInstance(captured[0][1], jpype.JArray(jpype.JByte))
+
+    def test_to_java_datetime(self):
+        """datetime should convert to java.sql.Timestamp."""
+        import jpype
+        Timestamp = jpype.JClass("java.sql.Timestamp")
+        dt = datetime(2024, 6, 15, 10, 30, 45)
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", (dt,))
+        captured = self.conn.jconn.getCapturedSetObjectArgs()
+        self.assertEqual(len(captured), 1)
+        self.assertIsInstance(captured[0][1], Timestamp)
+
+    def test_to_java_date(self):
+        """date should convert to java.sql.Date."""
+        import jpype
+        Date = jpype.JClass("java.sql.Date")
+        d = datetime(2024, 6, 15).date()
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", (d,))
+        captured = self.conn.jconn.getCapturedSetObjectArgs()
+        self.assertEqual(len(captured), 1)
+        self.assertIsInstance(captured[0][1], Date)
+
+    def test_to_java_time(self):
+        """time should convert to java.sql.Time."""
+        import jpype
+        Time = jpype.JClass("java.sql.Time")
+        t = datetime(2024, 6, 15, 10, 30, 45).time()
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", (t,))
+        captured = self.conn.jconn.getCapturedSetObjectArgs()
+        self.assertEqual(len(captured), 1)
+        self.assertIsInstance(captured[0][1], Time)
+
+    def test_to_java_decimal(self):
+        """Decimal should convert to java.math.BigDecimal."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        d = Decimal("123.456")
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", (d,))
+        captured = self.conn.jconn.getCapturedSetObjectArgs()
+        self.assertEqual(len(captured), 1)
+        self.assertIsInstance(captured[0][1], BigDecimal)
+        self.assertEqual(str(captured[0][1]), "123.456")
+
+    def test_to_java_int_passthrough(self):
+        """int should pass through unchanged."""
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", (42,))
+        captured = self.conn.jconn.getCapturedSetObjectArgs()
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0][1], 42)
+
+    def test_to_java_float_passthrough(self):
+        """float should pass through unchanged."""
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", (3.14,))
+        captured = self.conn.jconn.getCapturedSetObjectArgs()
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0][1], 3.14)
+
+    def test_to_java_str_passthrough(self):
+        """str should pass through unchanged."""
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", ("hello",))
+        captured = self.conn.jconn.getCapturedSetObjectArgs()
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0][1], "hello")
+
+    def test_to_java_list_raises_not_supported(self):
+        """list should raise NotSupportedError for ARRAY binding."""
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            with self.assertRaises(jaydebeapiarrow.NotSupportedError):
+                cursor.execute("dummy stmt", ([1, 2, 3],))
+
+    # --- DBAPITypeObject mapping tests ---
+
+    def test_dbapi_type_other_maps_to_string(self):
+        """JDBC OTHER should map to STRING type code."""
+        import jpype
+        Types = jpype.java.sql.Types
+        result = jaydebeapiarrow.DBAPITypeObject._map_jdbc_type_to_dbapi(Types.OTHER)
+        self.assertIs(result, jaydebeapiarrow.STRING)
+
+    def test_dbapi_type_nclob_maps_to_text(self):
+        """JDBC NCLOB should map to TEXT type code."""
+        import jpype
+        Types = jpype.java.sql.Types
+        result = jaydebeapiarrow.DBAPITypeObject._map_jdbc_type_to_dbapi(Types.NCLOB)
+        self.assertIs(result, jaydebeapiarrow.TEXT)
+
+    def test_dbapi_type_sqlxml_maps_to_text(self):
+        """JDBC SQLXML should map to TEXT type code."""
+        import jpype
+        Types = jpype.java.sql.Types
+        result = jaydebeapiarrow.DBAPITypeObject._map_jdbc_type_to_dbapi(Types.SQLXML)
+        self.assertIs(result, jaydebeapiarrow.TEXT)
+
+    def test_dbapi_type_rowid_maps_to_rowid(self):
+        """JDBC ROWID should map to ROWID type code."""
+        import jpype
+        Types = jpype.java.sql.Types
+        result = jaydebeapiarrow.DBAPITypeObject._map_jdbc_type_to_dbapi(Types.ROWID)
+        self.assertIs(result, jaydebeapiarrow.ROWID)
