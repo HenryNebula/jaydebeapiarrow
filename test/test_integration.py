@@ -378,7 +378,7 @@ class IntegrationTestBase(object):
     def test_bigint_column_returns_int(self):
         """Verify JDBC BIGINT columns return Python int, not raw java.lang.Long.
         Regression test for legacy baztian/jaydebeapi#63."""
-        if self.__class__.__name__ in ('OracleTest', 'DrillTest'):
+        if type(self).__name__ in ('OracleTest', 'DrillTest'):
             self.skipTest('BIGINT type not supported by this database')
         with self.conn.cursor() as cursor:
             cursor.execute("CREATE TABLE BIGINT_TEST (val BIGINT)")
