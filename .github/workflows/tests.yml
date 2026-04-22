@@ -63,17 +63,11 @@ jobs:
         key: ${{ matrix.plattform }}-${{ matrix.python-version }}-maven-${{ hashFiles('**/pom.xml') }}
         restore-keys: |
           ${{ matrix.plattform }}-${{ matrix.python-version }}-maven-
-    - name: JARs cache
+    - name: JDBC driver cache
       uses: actions/cache@v5
       with:
-        path: |
-          jaydebeapiarrow/lib/
-          test/jars/
-          arrow-jdbc-extension/target/
-          mockdriver/target/
-        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
-        restore-keys: |
-          ${{ runner.os }}-jars-
+        path: test/jars/
+        key: ${{ runner.os }}-jdbc-drivers-${{ hashFiles('test/download_jdbc_drivers.sh') }}
     - name: Pip cache
       uses: actions/cache@v5
       with:
@@ -88,11 +82,25 @@ jobs:
         python -m pip install coveralls tox tox-gh-actions
     - name: Test with tox for non Jython only
       run: tox
+      env:
+        JY_PG_HOST: localhost
+        JY_PG_PORT: "5432"
+        JY_PG_DB: test_db
+        JY_PG_USER: user
+        JY_PG_PASSWORD: password
+        JY_MYSQL_HOST: localhost
+        JY_MYSQL_PORT: "3306"
+        JY_MYSQL_DB: test_db
+        JY_MYSQL_USER: user
+        JY_MYSQL_PASSWORD: password
     - name: Publish Test Report
       uses: mikepenz/action-junit-report@v6
       if: always() # always run even if tests fail
       with:
+        check_name: "JUnit Test Report (Python ${{ matrix.python-version }})"
+        job_summary: true
         report_paths: '**/build/test-reports/*.xml'
+        report_title: "JUnit Test Report (Python ${{ matrix.python-version }})"
         detailed_summary: true
         include_passed: true
 #    - name: Coveralls
@@ -142,17 +150,6 @@ jobs:
       with:
         java-version: '11'
         distribution: 'temurin'
-    - name: JARs cache
-      uses: actions/cache@v5
-      with:
-        path: |
-          jaydebeapiarrow/lib/
-          test/jars/
-          arrow-jdbc-extension/target/
-          mockdriver/target/
-        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
-        restore-keys: |
-          ${{ runner.os }}-jars-
     - name: Pip cache
       uses: actions/cache@v5
       with:
@@ -171,6 +168,16 @@ jobs:
         JY_ORACLE_PORT: "1521"
         JY_ORACLE_USER: system
         JY_ORACLE_PASSWORD: Password123!
+    - name: Publish Test Report
+      uses: mikepenz/action-junit-report@v6
+      if: always()
+      with:
+        check_name: "JUnit Test Report (Oracle)"
+        job_summary: true
+        report_paths: '**/build/test-reports/*.xml'
+        report_title: "JUnit Test Report (Oracle)"
+        detailed_summary: true
+        include_passed: true
 
   test-mssql:
     runs-on: ubuntu-latest
@@ -204,17 +211,6 @@ jobs:
       with:
         java-version: '11'
         distribution: 'temurin'
-    - name: JARs cache
-      uses: actions/cache@v5
-      with:
-        path: |
-          jaydebeapiarrow/lib/
-          test/jars/
-          arrow-jdbc-extension/target/
-          mockdriver/target/
-        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
-        restore-keys: |
-          ${{ runner.os }}-jars-
     - name: Pip cache
       uses: actions/cache@v5
       with:
@@ -233,6 +229,16 @@ jobs:
         JY_MSSQL_PORT: "1433"
         JY_MSSQL_USER: sa
         JY_MSSQL_PASSWORD: "Password123!"
+    - name: Publish Test Report
+      uses: mikepenz/action-junit-report@v6
+      if: always()
+      with:
+        check_name: "JUnit Test Report (MSSQL)"
+        job_summary: true
+        report_paths: '**/build/test-reports/*.xml'
+        report_title: "JUnit Test Report (MSSQL)"
+        detailed_summary: true
+        include_passed: true
 
   test-trino:
     runs-on: ubuntu-latest
@@ -268,17 +274,6 @@ jobs:
       with:
         java-version: '11'
         distribution: 'temurin'
-    - name: JARs cache
-      uses: actions/cache@v5
-      with:
-        path: |
-          jaydebeapiarrow/lib/
-          test/jars/
-          arrow-jdbc-extension/target/
-          mockdriver/target/
-        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
-        restore-keys: |
-          ${{ runner.os }}-jars-
     - name: Pip cache
       uses: actions/cache@v5
       with:
@@ -296,6 +291,16 @@ jobs:
         JY_TRINO_HOST: localhost
         JY_TRINO_PORT: "8080"
         JY_TRINO_USER: test
+    - name: Publish Test Report
+      uses: mikepenz/action-junit-report@v6
+      if: always()
+      with:
+        check_name: "JUnit Test Report (Trino)"
+        job_summary: true
+        report_paths: '**/build/test-reports/*.xml'
+        report_title: "JUnit Test Report (Trino)"
+        detailed_summary: true
+        include_passed: true
 
   test-db2:
     runs-on: ubuntu-latest
@@ -317,17 +322,11 @@ jobs:
       with:
         java-version: '11'
         distribution: 'temurin'
-    - name: JARs cache
+    - name: JDBC driver cache
       uses: actions/cache@v5
       with:
-        path: |
-          jaydebeapiarrow/lib/
-          test/jars/
-          arrow-jdbc-extension/target/
-          mockdriver/target/
-        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
-        restore-keys: |
-          ${{ runner.os }}-jars-
+        path: test/jars/
+        key: ${{ runner.os }}-jdbc-drivers-${{ hashFiles('test/download_jdbc_drivers.sh') }}
     - name: Start DB2 container
       run: |
         docker run -d --name db2 --privileged \
@@ -364,6 +363,16 @@ jobs:
         JY_DB2_PORT: "50000"
         JY_DB2_USER: db2inst1
         JY_DB2_PASSWORD: "Password123!"
+    - name: Publish Test Report
+      uses: mikepenz/action-junit-report@v6
+      if: always()
+      with:
+        check_name: "JUnit Test Report (DB2)"
+        job_summary: true
+        report_paths: '**/build/test-reports/*.xml'
+        report_title: "JUnit Test Report (DB2)"
+        detailed_summary: true
+        include_passed: true
 
   test-drill:
     runs-on: ubuntu-latest
@@ -385,32 +394,29 @@ jobs:
       with:
         java-version: '11'
         distribution: 'temurin'
-    - name: JARs cache
+    - name: JDBC driver cache
       uses: actions/cache@v5
       with:
-        path: |
-          jaydebeapiarrow/lib/
-          test/jars/
-          arrow-jdbc-extension/target/
-          mockdriver/target/
-        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh', 'test/download_jdbc_drivers.sh') }}
-        restore-keys: |
-          ${{ runner.os }}-jars-
+        path: test/jars/
+        key: ${{ runner.os }}-jdbc-drivers-${{ hashFiles('test/download_jdbc_drivers.sh') }}
     - name: Start Drill container
       run: |
-        docker run -d --name drill \
+        docker run -d -i --name drill \
           -p 31010:31010 \
-          -p 8047:8047 \
+          -e DRILLBIT_MAX_PROC_MEM=8G \
+          -e DRILL_HEAP=4G \
+          -e DRILL_MAX_DIRECT_MEMORY=4G \
           apache/drill:1.21.0
         echo "Waiting for Drill to be ready..."
         for i in $(seq 1 30); do
-          if curl -sf http://localhost:8047/stats.json >/dev/null 2>&1; then
+          if nc -z localhost 31010 2>/dev/null; then
             echo "Drill is ready!"
             break
           fi
           echo "  Waiting... ($i/30)"
           sleep 5
         done
+        docker logs drill
     - name: Pip cache
       uses: actions/cache@v5
       with:
@@ -428,3 +434,13 @@ jobs:
       env:
         JY_DRILL_HOST: localhost
         JY_DRILL_PORT: "31010"
+    - name: Publish Test Report
+      uses: mikepenz/action-junit-report@v6
+      if: always()
+      with:
+        check_name: "JUnit Test Report (Drill)"
+        job_summary: true
+        report_paths: '**/build/test-reports/*.xml'
+        report_title: "JUnit Test Report (Drill)"
+        detailed_summary: true
+        include_passed: true

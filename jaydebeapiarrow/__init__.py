@@ -22,16 +22,17 @@
 # 2. Enforce typing for Decimal and temporal types
 
 import importlib.metadata
+import re
 
 __version__ = importlib.metadata.version("JayDeBeApiArrow")
-__version_info__ = tuple(int(x) for x in __version__.split("."))
+_ver_match = re.match(r"^(\d+)\.(\d+)\.(\d+)", __version__)
+__version_info__ = tuple(int(x) for x in _ver_match.groups()) if _ver_match else (0, 0, 0)
 
 import datetime
 from decimal import Decimal
 import glob
 import os
 import time
-import re
 import sys
 import warnings
 
@@ -274,9 +275,9 @@ class DBAPITypeObject(object):
             return None
 
 
-STRING = DBAPITypeObject('STRING', 'CHAR', 'NCHAR', 'NVARCHAR', 'VARCHAR') # TODO: 'OTHER' not supported
+STRING = DBAPITypeObject('STRING', 'CHAR', 'NCHAR', 'NVARCHAR', 'VARCHAR', 'OTHER')
 
-TEXT = DBAPITypeObject('TEXT', 'CLOB', 'LONGVARCHAR', 'LONGNVARCHAR') # TODO: 'NCLOB', 'SQLXML' not supported
+TEXT = DBAPITypeObject('TEXT', 'CLOB', 'LONGVARCHAR', 'LONGNVARCHAR', 'NCLOB', 'SQLXML')
 
 BINARY = DBAPITypeObject('BINARY', 'BINARY', 'BLOB', 'LONGVARBINARY', 'VARBINARY')
 
@@ -291,9 +292,11 @@ DATE = DBAPITypeObject('DATE', 'DATE')
 
 TIME = DBAPITypeObject('TIME', 'TIME')
 
-DATETIME = DBAPITypeObject('TIMESTAMP', 'TIMESTAMP')
+DATETIME = DBAPITypeObject('TIMESTAMP', 'TIMESTAMP', 'TIMESTAMP_WITH_TIMEZONE', 'TIME_WITH_TIMEZONE')
 
-# ROWID = DBAPITypeObject('ROWID', 'ROWID') # TODO: 'ROWID' not supported
+ROWID = DBAPITypeObject('ROWID', 'ROWID')
+
+ARRAY = DBAPITypeObject('ARRAY', 'ARRAY')
 
 # DB-API 2.0 Module Interface Exceptions
 class Error(Exception):
@@ -540,8 +543,12 @@ class Cursor(object):
 
         def _to_java(p):
             """Convert Python types to Java SQL types for setObject()."""
+            if p is None:
+                return p  # JPype passes Python None as Java null; setObject(i, null) is valid JDBC
             if isinstance(p, bool):
                 return p
+            if isinstance(p, (bytes, bytearray)):
+                return jpype.JArray(jpype.JByte)(p)
             if isinstance(p, datetime.datetime):
                 return jpype.JClass("java.sql.Timestamp").valueOf(
                     p.strftime("%Y-%m-%d %H:%M:%S"))
@@ -551,6 +558,12 @@ class Cursor(object):
                 return jpype.JClass("java.sql.Time").valueOf(p.isoformat())
             if isinstance(p, Decimal):
                 return jpype.JClass("java.math.BigDecimal")(str(p))
+            if isinstance(p, list):
+                raise NotSupportedError(
+                    "ARRAY type parameter binding is not supported. "
+                    "Use server-side SQL functions to construct arrays, "
+                    "or cast to VARCHAR in your query."
+                )
             return p
 
         if is_batch:
@@ -596,7 +609,7 @@ class Cursor(object):
             return self._iter
         if not self._rs:
             raise Error()
-        # Use a reasonable batch size. 
+        # Use a reasonable batch size.
         # For small reads (fetchone), this might be overhead, but it's safe.
         # For large reads (fetchall), this is efficient.
         # Using arraysize or a default.
@@ -607,16 +620,16 @@ class Cursor(object):
     def fetchone(self):
         if not self._rs:
             raise Error()
-        
+
         if self._buffer:
             return self._buffer.pop(0)
-        
+
         it = self._get_iter()
         rows = fetch_next_batch(it)
         if rows:
             self._buffer.extend(rows)
             return self._buffer.pop(0)
-        
+
         return None
 
     def fetchmany(self, size=None):

@@ -23,13 +23,14 @@ echo "Build complete: $JAR_FILE"
 
 # Build MockDriver (used by mock tests)
 MOCK_DIR="$PROJECT_ROOT/mockdriver"
+MOCK_JARS_DIR="$SCRIPT_DIR/mock-jars"
 echo "Building MockDriver..."
 cd "$MOCK_DIR"
 mvn clean compile assembly:single
-mkdir -p "$JARS_DIR"
-cp "$MOCK_DIR/target/"*-jar-with-dependencies.jar "$JARS_DIR/"
+mkdir -p "$MOCK_JARS_DIR"
+cp "$MOCK_DIR/target/"*-jar-with-dependencies.jar "$MOCK_JARS_DIR/"
 
-MOCK_JAR=$(ls "$JARS_DIR/mockdriver"*"-jar-with-dependencies.jar" 2>/dev/null | head -1)
+MOCK_JAR=$(ls "$MOCK_JARS_DIR/mockdriver"*"-jar-with-dependencies.jar" 2>/dev/null | head -1)
 if [ ! -f "$MOCK_JAR" ]; then
     echo "Error: Failed to build MockDriver JAR"
     exit 1

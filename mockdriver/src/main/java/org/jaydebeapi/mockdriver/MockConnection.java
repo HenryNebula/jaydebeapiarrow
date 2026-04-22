@@ -4,7 +4,9 @@ import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.sql.*;
 import java.time.*;
+import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.List;
 import org.mockito.Mockito;
 
 public abstract class MockConnection implements Connection {
@@ -93,6 +95,95 @@ public abstract class MockConnection implements Connection {
     BigDecimal columnValue = BigDecimal.valueOf(value, scale);
     Mockito.when(mockResultSet.getObject(1)).thenReturn(columnValue);
     Mockito.when(mockResultSet.getBigDecimal(1)).thenReturn(columnValue);
+    Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
+
+  public final void mockNullDecimalResult(int precision, int scale) throws SQLException {
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for null Decimal)");
+    Mockito.when(mockPreparedStatement.getResultSet()).thenReturn(mockResultSet);
+    Mockito.when(mockResultSet.next()).thenReturn(true);
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    mockGeneralResultSetMetaData(mockMetaData, Types.DECIMAL);
+    Mockito.when(mockMetaData.getPrecision(1)).thenReturn(precision);
+    Mockito.when(mockMetaData.getScale(1)).thenReturn(scale);
+    Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
+
+    Mockito.when(mockResultSet.getObject(1)).thenReturn(null);
+    Mockito.when(mockResultSet.wasNull()).thenReturn(true);
+    Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
+
+  public final void mockHighPrecisionDecimalResult(BigDecimal value, int precision, int scale) throws SQLException {
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for high-precision Decimal)");
+    Mockito.when(mockPreparedStatement.getResultSet()).thenReturn(mockResultSet);
+    Mockito.when(mockResultSet.next()).thenReturn(true);
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    mockGeneralResultSetMetaData(mockMetaData, Types.DECIMAL);
+    Mockito.when(mockMetaData.getPrecision(1)).thenReturn(precision);
+    Mockito.when(mockMetaData.getScale(1)).thenReturn(scale);
+    Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
+
+    Mockito.when(mockResultSet.getObject(1)).thenReturn(value);
+    Mockito.when(mockResultSet.wasNull()).thenReturn(false);
+    Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
+
+  public final void mockIntegerDecimalResult(long value, int precision, int scale) throws SQLException {
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for Integer-as-Decimal)");
+    Mockito.when(mockPreparedStatement.getResultSet()).thenReturn(mockResultSet);
+    Mockito.when(mockResultSet.next()).thenReturn(true);
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    mockGeneralResultSetMetaData(mockMetaData, Types.DECIMAL);
+    Mockito.when(mockMetaData.getPrecision(1)).thenReturn(precision);
+    Mockito.when(mockMetaData.getScale(1)).thenReturn(scale);
+    Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
+
+    // Real drivers return BigDecimal even for integer-like values (e.g., Oracle NUMBER(10)).
+    // The value has scale 0; OverriddenConsumer may inflate the vector scale,
+    // causing precision overflow when setScale pads trailing zeros.
+    BigDecimal bdValue = BigDecimal.valueOf(value);
+    Mockito.when(mockResultSet.getObject(1)).thenReturn(bdValue);
+    Mockito.when(mockResultSet.wasNull()).thenReturn(false);
+    Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
+
+  public final void mockNullNumericResult(int precision, int scale) throws SQLException {
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for null Numeric)");
+    Mockito.when(mockPreparedStatement.getResultSet()).thenReturn(mockResultSet);
+    Mockito.when(mockResultSet.next()).thenReturn(true);
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    mockGeneralResultSetMetaData(mockMetaData, Types.NUMERIC);
+    Mockito.when(mockMetaData.getPrecision(1)).thenReturn(precision);
+    Mockito.when(mockMetaData.getScale(1)).thenReturn(scale);
+    Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
+
+    Mockito.when(mockResultSet.getObject(1)).thenReturn(null);
+    Mockito.when(mockResultSet.wasNull()).thenReturn(true);
+    Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
+
+  public final void mockNumericTypeResult(BigDecimal value, int precision, int scale) throws SQLException {
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for NUMERIC type)");
+    Mockito.when(mockPreparedStatement.getResultSet()).thenReturn(mockResultSet);
+    Mockito.when(mockResultSet.next()).thenReturn(true);
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    mockGeneralResultSetMetaData(mockMetaData, Types.NUMERIC);
+    Mockito.when(mockMetaData.getPrecision(1)).thenReturn(precision);
+    Mockito.when(mockMetaData.getScale(1)).thenReturn(scale);
+    Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
+
+    Mockito.when(mockResultSet.getObject(1)).thenReturn(value);
+    Mockito.when(mockResultSet.wasNull()).thenReturn(false);
     Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
   }
 
@@ -211,6 +302,34 @@ public abstract class MockConnection implements Connection {
     Mockito.when(mockResultSet.getObject(1)).thenReturn(object);
     Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
     Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
+
+  private List<Object[]> capturedSetObjectArgs;
+
+  /** Set up a PreparedStatement that captures all setObject() calls.
+   *  Rejects Arrow-stream binding to force the _set_stmt_parms_fallback path. */
+  public final void mockSetObjectCapture() throws SQLException {
+    capturedSetObjectArgs = new ArrayList<>();
+    // Throw by default so Arrow primary path fails and fallback is triggered
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class,
+        invocation -> { throw new UnsupportedOperationException("mockSetObjectCapture"); });
+    Mockito.doReturn(true).when(mockPreparedStatement).execute();
+    Mockito.doNothing().when(mockPreparedStatement).close();
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for setObject capture)");
+    Mockito.doReturn(mockResultSet).when(mockPreparedStatement).getResultSet();
+    Mockito.doReturn(false).when(mockResultSet).next();
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    Mockito.doReturn(0).when(mockMetaData).getColumnCount();
+    Mockito.doReturn(mockMetaData).when(mockResultSet).getMetaData();
+    Mockito.doAnswer(invocation -> {
+      capturedSetObjectArgs.add(new Object[]{invocation.getArgument(0), invocation.getArgument(1)});
+      return null;
+    }).when(mockPreparedStatement).setObject(Mockito.anyInt(), Mockito.any());
+    Mockito.doReturn(mockPreparedStatement).when(this).prepareStatement(Mockito.any());
+  }
+
+  public final List<Object[]> getCapturedSetObjectArgs() {
+    return capturedSetObjectArgs;
   }
 
   public final ResultSet verifyResultSet() {
