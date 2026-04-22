@@ -528,13 +528,37 @@ class MockTest(unittest.TestCase):
     # --- _to_java() parameter binding tests ---
 
     def test_to_java_none(self):
-        """None should pass through as Java null."""
+        """None should use setNull() instead of setObject() for driver
+        compatibility (e.g. Teradata rejects setObject(i, null))."""
+        import jpype
         self.conn.jconn.mockSetObjectCapture()
         with self.conn.cursor() as cursor:
             cursor.execute("dummy stmt", (None,))
         captured = self.conn.jconn.getCapturedSetObjectArgs()
-        self.assertEqual(len(captured), 1)
-        self.assertIsNone(captured[0][1])
+        self.assertEqual(len(captured), 0, "setObject should not be called for None")
+        null_captured = self.conn.jconn.getCapturedSetNullArgs()
+        self.assertEqual(len(null_captured), 1)
+        self.assertEqual(null_captured[0][0], 1)  # parameter index (1-based)
+        self.assertEqual(null_captured[0][1], jpype.java.sql.Types.NULL)
+
+    def test_to_java_none_mixed_params(self):
+        """None among non-None params should use setNull() for the None slots."""
+        import jpype
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", (42, None, "hello", None))
+        obj_captured = self.conn.jconn.getCapturedSetObjectArgs()
+        self.assertEqual(len(obj_captured), 2)
+        self.assertEqual(obj_captured[0][0], 1)
+        self.assertEqual(obj_captured[0][1], 42)
+        self.assertEqual(obj_captured[1][0], 3)
+        self.assertEqual(obj_captured[1][1], "hello")
+        null_captured = self.conn.jconn.getCapturedSetNullArgs()
+        self.assertEqual(len(null_captured), 2)
+        self.assertEqual(null_captured[0][0], 2)
+        self.assertEqual(null_captured[0][1], jpype.java.sql.Types.NULL)
+        self.assertEqual(null_captured[1][0], 4)
+        self.assertEqual(null_captured[1][1], jpype.java.sql.Types.NULL)
 
     def test_to_java_bool(self):
         """bool should pass through unchanged."""
