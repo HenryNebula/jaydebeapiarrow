@@ -1234,6 +1234,10 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
         self.assertEqual(result[7], Decimal('0.1234'))
         self.assertEqual(result[8], Decimal('-99.99'))
 
+    def test_execute_param_none(self):
+        """Drill has no INSERT INTO ... VALUES — skip param none test."""
+        self.skipTest("Drill does not support INSERT INTO ... VALUES")
+
     def test_execute_different_rowcounts(self):
         """Drill has no INSERT INTO ... VALUES — skip rowcount test."""
         self.skipTest("Drill does not support INSERT INTO ... VALUES")
