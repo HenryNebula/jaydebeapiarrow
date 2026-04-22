@@ -15,7 +15,7 @@ def _is_new_jpype():
     if platform.python_implementation() != 'Jython':
         import jpype
         try:
-            ver_match = re.match('\d+\.\d+', jpype.__version__)
+            ver_match = re.match(r'\d+\.\d+', jpype.__version__)
             if ver_match:
                 jpype_ver = float(ver_match.group(0))
                 if jpype_ver >= 0.7:
