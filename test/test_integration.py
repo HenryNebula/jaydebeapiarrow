@@ -303,6 +303,35 @@ class IntegrationTestBase(object):
         value = result[0]
         self.assertEqual(value, memoryview(binary_stuff))
 
+    def test_timestamp_microsecond_precision(self):
+        """Verify that TIMESTAMP columns preserve microsecond precision.
+        Regression test for legacy issue baztian/jaydebeapi#229 where certain
+        microsecond values (e.g. 90000) were corrupted during the Arrow
+        conversion."""
+        test_cases = [
+            (2009, 9, 11, 10, 0, 0, 200000),
+            (2009, 9, 11, 10, 0, 1, 90000),
+            (2009, 9, 11, 10, 0, 2, 123456),
+            (2009, 9, 11, 10, 0, 3, 0),
+            (2009, 9, 11, 10, 0, 4, 999999),
+        ]
+        stmt = ("insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE) "
+                "values (?, ?, ?)")
+        with self.conn.cursor() as cursor:
+            for idx, (y, mo, d, h, mi, s, us) in enumerate(test_cases):
+                ts = self.dbapi.Timestamp(y, mo, d, h, mi, s, us)
+                cursor.execute(stmt, (ts, 50 + idx, Decimal('1.0')))
+            cursor.execute(
+                "select ACCOUNT_ID from ACCOUNT "
+                "where ACCOUNT_NO >= 50 order by ACCOUNT_NO")
+            results = cursor.fetchall()
+        for idx, (y, mo, d, h, mi, s, us) in enumerate(test_cases):
+            expected = self._cast_datetime(
+                f'{y}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}:{s:02d}.{us:06d}',
+                r'%Y-%m-%d %H:%M:%S.%f')
+            self.assertEqual(results[idx][0], expected,
+                             f"Failed for microseconds={us}")
+
     def test_numeric_types(self):
         """Test that NUMERIC columns round-trip correctly, including NULL values
         and edge-case precision/scale values."""
