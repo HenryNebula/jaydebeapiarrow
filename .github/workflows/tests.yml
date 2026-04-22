@@ -97,6 +97,8 @@ jobs:
       uses: mikepenz/action-junit-report@v6
       if: always() # always run even if tests fail
       with:
+        check_name: "JUnit Test Report (Python ${{ matrix.python-version }})"
+        job_summary: true
         report_paths: '**/build/test-reports/*.xml'
         report_title: "JUnit Test Report (Python ${{ matrix.python-version }})"
         detailed_summary: true
@@ -170,6 +172,8 @@ jobs:
       uses: mikepenz/action-junit-report@v6
       if: always()
       with:
+        check_name: "JUnit Test Report (Oracle)"
+        job_summary: true
         report_paths: '**/build/test-reports/*.xml'
         report_title: "JUnit Test Report (Oracle)"
         detailed_summary: true
@@ -229,6 +233,8 @@ jobs:
       uses: mikepenz/action-junit-report@v6
       if: always()
       with:
+        check_name: "JUnit Test Report (MSSQL)"
+        job_summary: true
         report_paths: '**/build/test-reports/*.xml'
         report_title: "JUnit Test Report (MSSQL)"
         detailed_summary: true
@@ -289,6 +295,8 @@ jobs:
       uses: mikepenz/action-junit-report@v6
       if: always()
       with:
+        check_name: "JUnit Test Report (Trino)"
+        job_summary: true
         report_paths: '**/build/test-reports/*.xml'
         report_title: "JUnit Test Report (Trino)"
         detailed_summary: true
@@ -359,6 +367,8 @@ jobs:
       uses: mikepenz/action-junit-report@v6
       if: always()
       with:
+        check_name: "JUnit Test Report (DB2)"
+        job_summary: true
         report_paths: '**/build/test-reports/*.xml'
         report_title: "JUnit Test Report (DB2)"
         detailed_summary: true
@@ -428,6 +438,8 @@ jobs:
       uses: mikepenz/action-junit-report@v6
       if: always()
       with:
+        check_name: "JUnit Test Report (Drill)"
+        job_summary: true
         report_paths: '**/build/test-reports/*.xml'
         report_title: "JUnit Test Report (Drill)"
         detailed_summary: true
