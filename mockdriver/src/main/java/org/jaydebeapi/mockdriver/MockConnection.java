@@ -4,7 +4,9 @@ import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.sql.*;
 import java.time.*;
+import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.List;
 import org.mockito.Mockito;
 
 public abstract class MockConnection implements Connection {
@@ -300,6 +302,34 @@ public abstract class MockConnection implements Connection {
     Mockito.when(mockResultSet.getObject(1)).thenReturn(object);
     Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
     Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
+
+  private List<Object[]> capturedSetObjectArgs;
+
+  /** Set up a PreparedStatement that captures all setObject() calls.
+   *  Rejects Arrow-stream binding to force the _set_stmt_parms_fallback path. */
+  public final void mockSetObjectCapture() throws SQLException {
+    capturedSetObjectArgs = new ArrayList<>();
+    // Throw by default so Arrow primary path fails and fallback is triggered
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class,
+        invocation -> { throw new UnsupportedOperationException("mockSetObjectCapture"); });
+    Mockito.doReturn(true).when(mockPreparedStatement).execute();
+    Mockito.doNothing().when(mockPreparedStatement).close();
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for setObject capture)");
+    Mockito.doReturn(mockResultSet).when(mockPreparedStatement).getResultSet();
+    Mockito.doReturn(false).when(mockResultSet).next();
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    Mockito.doReturn(0).when(mockMetaData).getColumnCount();
+    Mockito.doReturn(mockMetaData).when(mockResultSet).getMetaData();
+    Mockito.doAnswer(invocation -> {
+      capturedSetObjectArgs.add(new Object[]{invocation.getArgument(0), invocation.getArgument(1)});
+      return null;
+    }).when(mockPreparedStatement).setObject(Mockito.anyInt(), Mockito.any());
+    Mockito.doReturn(mockPreparedStatement).when(this).prepareStatement(Mockito.any());
+  }
+
+  public final List<Object[]> getCapturedSetObjectArgs() {
+    return capturedSetObjectArgs;
   }
 
   public final ResultSet verifyResultSet() {

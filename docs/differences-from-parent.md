@@ -29,6 +29,15 @@ This fork returns native Python types instead of strings for temporal and numeri
 - **`fetch_df()`** — returns a `pandas.DataFrame` via the optimized Arrow path.
 - **`TIMESTAMP_WITH_TIMEZONE` support** — properly handled as timezone-aware `datetime` (the parent has no converter for this type).
 - **`set_debug()`** — enables JUL-level debug logging from the Java bridge.
+
+### Type Mapping Improvements
+
+- **Complete DBAPITypeObject coverage** — `OTHER` → STRING, `NCLOB`/`SQLXML` → TEXT, `ROWID`, `ARRAY` are now registered. The parent omits these, causing `cursor.description` to return `None` for their type codes.
 - **ARRAY type detection** — columns reported as JDBC `ARRAY` are mapped to `VARCHAR` as a degraded fallback with a logged warning. Full ARRAY support is not available in the Arrow JDBC adapter.
 - **JSON/JSONB/UUID detection** — columns reported as JDBC `OTHER` with type names containing `JSON` or `UUID` (e.g., PostgreSQL) are explicitly mapped to `VARCHAR`.
+
+### Parameter Binding Improvements
+
 - **`bytes`/`bytearray` parameter binding** — the fallback `_to_java()` converter now converts Python bytes to Java `byte[]` for `BLOB`/`BINARY` columns.
+- **`None` parameter binding** — explicit passthrough for Python `None` → Java `null` via `setObject()`.
+- **`list` parameter binding rejected** — passing a `list` as a parameter raises `NotSupportedError` with a clear message, instead of failing with a cryptic Java type error.

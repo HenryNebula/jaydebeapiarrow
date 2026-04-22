@@ -291,9 +291,11 @@ DATE = DBAPITypeObject('DATE', 'DATE')
 
 TIME = DBAPITypeObject('TIME', 'TIME')
 
-DATETIME = DBAPITypeObject('TIMESTAMP', 'TIMESTAMP')
+DATETIME = DBAPITypeObject('TIMESTAMP', 'TIMESTAMP', 'TIMESTAMP_WITH_TIMEZONE', 'TIME_WITH_TIMEZONE')
 
 ROWID = DBAPITypeObject('ROWID', 'ROWID')
+
+ARRAY = DBAPITypeObject('ARRAY', 'ARRAY')
 
 # DB-API 2.0 Module Interface Exceptions
 class Error(Exception):

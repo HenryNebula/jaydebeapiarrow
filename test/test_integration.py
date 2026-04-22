@@ -389,6 +389,17 @@ class IntegrationTestBase(object):
             except Exception:
                 pass
 
+    def test_execute_param_none(self):
+        """Verify that Python None round-trips as SQL NULL via parameter binding."""
+        stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING) " \
+               "values (?, ?, ?, ?)"
+        account_id = self.dbapi.Timestamp(2010, 1, 26, 14, 31, 59)
+        with self.conn.cursor() as cursor:
+            cursor.execute(stmt, (account_id, 30, Decimal('5.0'), None))
+            cursor.execute("select BLOCKING from ACCOUNT where ACCOUNT_NO = 30")
+            result = cursor.fetchone()
+        self.assertIsNone(result[0])
+
 class SqliteTestBase(IntegrationTestBase):
 
     def setUpSql(self):
@@ -653,6 +664,60 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
         # 10:30 AEDT (UTC+11) = 2024-01-14 23:30:00 UTC
         self.assertEqual(result[1], datetime(2024, 1, 14, 23, 30, 0, tzinfo=timezone.utc))
         self.assertIsNotNone(result[1].tzinfo)
+
+    def test_json_column_read(self):
+        """Verify JSON columns (JDBC OTHER) are readable as strings via ExplicitTypeMapper."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE test_json_type (id INT, data JSON)")
+            try:
+                cursor.execute(
+                    "INSERT INTO test_json_type (id, data) VALUES (1, '{\"key\": \"value\"}')"
+                )
+                cursor.execute("SELECT data FROM test_json_type WHERE id = 1")
+                result = cursor.fetchone()
+                # Verify data is readable as a string
+                self.assertIsInstance(result[0], str)
+                self.assertIn("key", result[0])
+                # Verify cursor.description reports STRING type code (OTHER → STRING)
+                self.assertIs(cursor.description[0][1], jaydebeapiarrow.STRING)
+            finally:
+                cursor.execute("DROP TABLE test_json_type")
+
+    def test_uuid_column_read(self):
+        """Verify UUID columns (JDBC OTHER) are readable as strings via ExplicitTypeMapper."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE test_uuid_type (id INT, data UUID)")
+            try:
+                cursor.execute(
+                    "INSERT INTO test_uuid_type (id, data) "
+                    "VALUES (1, 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11')"
+                )
+                cursor.execute("SELECT data FROM test_uuid_type WHERE id = 1")
+                result = cursor.fetchone()
+                # Verify data is readable as a string
+                self.assertIsInstance(result[0], str)
+                self.assertEqual(result[0], "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+                # Verify cursor.description reports STRING type code (OTHER → STRING)
+                self.assertIs(cursor.description[0][1], jaydebeapiarrow.STRING)
+            finally:
+                cursor.execute("DROP TABLE test_uuid_type")
+
+    def test_array_column_read(self):
+        """Verify ARRAY columns are readable as strings via ExplicitTypeMapper VARCHAR fallback."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE test_array_type (id INT, data INTEGER[])")
+            try:
+                cursor.execute(
+                    "INSERT INTO test_array_type (id, data) VALUES (1, '{1,2,3}')"
+                )
+                cursor.execute("SELECT data FROM test_array_type WHERE id = 1")
+                result = cursor.fetchone()
+                # Verify data is readable (degraded VARCHAR fallback — toString representation)
+                self.assertIsInstance(result[0], str)
+                # Verify cursor.description reports ARRAY type code
+                self.assertIs(cursor.description[0][1], jaydebeapiarrow.ARRAY)
+            finally:
+                cursor.execute("DROP TABLE test_array_type")
 
     def test_execute_timestamptz_roundtrip_param_binding(self):
         """Test writing a TZ-aware datetime via parameter binding and reading back."""
