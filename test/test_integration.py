@@ -309,19 +309,19 @@ class IntegrationTestBase(object):
         due to string-based timestamp parsing. The Arrow path uses integer
         nanosecond representation, so this should be correct."""
         with self.conn.cursor() as cursor:
-            # Insert timestamps with leading-zero milliseconds
+            # Insert timestamps with leading-zero milliseconds via TIMESTAMP literals
             cursor.execute(
                 "INSERT INTO ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE) "
-                "VALUES ('2020-01-05 11:02:14.080', 50, 1.0)")
+                "VALUES (TIMESTAMP '2020-01-05 11:02:14.080', 50, 1.0)")
             cursor.execute(
                 "INSERT INTO ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE) "
-                "VALUES ('2020-01-07 03:25:20.743', 51, 2.0)")
+                "VALUES (TIMESTAMP '2020-01-07 03:25:20.743', 51, 2.0)")
             cursor.execute(
                 "INSERT INTO ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE) "
-                "VALUES ('2020-06-01 00:00:00.009', 52, 3.0)")
+                "VALUES (TIMESTAMP '2020-06-01 00:00:00.009', 52, 3.0)")
             cursor.execute(
                 "INSERT INTO ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE) "
-                "VALUES ('2020-03-15 12:00:00.007', 53, 4.0)")
+                "VALUES (TIMESTAMP '2020-03-15 12:00:00.007', 53, 4.0)")
             cursor.execute(
                 "SELECT ACCOUNT_ID FROM ACCOUNT "
                 "WHERE ACCOUNT_NO >= 50 ORDER BY ACCOUNT_NO")
@@ -1265,6 +1265,10 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
 
     def test_execute_param_none(self):
         """Drill has no INSERT INTO ... VALUES — skip param none test."""
+        self.skipTest("Drill does not support INSERT INTO ... VALUES")
+
+    def test_timestamp_ms_leading_zeros(self):
+        """Drill has no INSERT INTO ... VALUES — skip timestamp ms test."""
         self.skipTest("Drill does not support INSERT INTO ... VALUES")
 
     def test_execute_different_rowcounts(self):
