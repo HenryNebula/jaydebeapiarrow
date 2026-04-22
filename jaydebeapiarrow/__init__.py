@@ -22,16 +22,17 @@
 # 2. Enforce typing for Decimal and temporal types
 
 import importlib.metadata
+import re
 
 __version__ = importlib.metadata.version("JayDeBeApiArrow")
-__version_info__ = tuple(int(x) for x in __version__.split("."))
+_ver_match = re.match(r"^(\d+)\.(\d+)\.(\d+)", __version__)
+__version_info__ = tuple(int(x) for x in _ver_match.groups()) if _ver_match else (0, 0, 0)
 
 import datetime
 from decimal import Decimal
 import glob
 import os
 import time
-import re
 import sys
 import warnings
 

@@ -43,6 +43,11 @@ jobs:
       run: pip install build
     - name: Build wheel and tarball
       run: python3 -m build
+    - name: Verify package import from built wheel
+      run: |
+        WHEEL=$(ls dist/*.whl | tail -1)
+        pip install "$WHEEL"
+        python3 -c "import jaydebeapiarrow; print(f'OK: {jaydebeapiarrow.__version__} -> {jaydebeapiarrow.__version_info__}')"
     - name: Store artifact
       uses: actions/upload-artifact@v7
       with:
