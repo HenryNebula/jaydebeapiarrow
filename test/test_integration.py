@@ -604,6 +604,26 @@ class HsqldbTest(IntegrationTestBase, unittest.TestCase):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_hsqldb.sql'))
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert.sql'))
 
+    def test_connect_no_jpype_deprecation_warnings(self):
+        """Verify that HSQLDB connection does not emit JPype
+        DeprecationWarnings. Regression test for legacy
+        baztian/jaydebeapi#203."""
+        import warnings
+        self.conn.close()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            self.conn = jaydebeapiarrow.connect(
+                'org.hsqldb.jdbcDriver',
+                'jdbc:hsqldb:mem:.',
+                ['SA', ''])
+        jpype_warnings = [w for w in caught
+                          if issubclass(w.category, DeprecationWarning)
+                          and 'jpype' in str(w.message).lower()]
+        self.assertEqual(
+            len(jpype_warnings), 0,
+            f'Unexpected JPype deprecation warnings: '
+            f'{[str(w.message) for w in jpype_warnings]}')
+
 
 class PostgresTest(IntegrationTestBase, unittest.TestCase):
 
