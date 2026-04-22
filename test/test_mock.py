@@ -116,6 +116,26 @@ class MockTest(unittest.TestCase):
             self.assertIsInstance(result[0], int)
             self.assertEqual(result[0], val)
 
+    def test_double_type_returns_float(self):
+        """Verify JDBC DOUBLE columns return Python float, not raw java.lang.Double.
+        Regression test for legacy baztian/jaydebeapi#243."""
+        self.conn.jconn.mockDoubleResult(3.14)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertIsInstance(result[0], float)
+        self.assertAlmostEqual(result[0], 3.14)
+
+    def test_double_edge_values(self):
+        """Verify DOUBLE edge cases: zero, negative, very large, very small."""
+        for val in [0.0, -1.5, 1.7976931348623157e+308, 4.9e-324]:
+            self.conn.jconn.mockDoubleResult(val)
+            with self.conn.cursor() as cursor:
+                cursor.execute("dummy stmt")
+                result = cursor.fetchone()
+            self.assertIsInstance(result[0], float)
+            self.assertEqual(result[0], val)
+
     def test_decimal_null_value(self):
         """SQL NULL in a DECIMAL column should return None, not crash or return 0."""
         self.conn.jconn.mockNullDecimalResult(10, 2)

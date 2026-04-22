@@ -398,6 +398,26 @@ class IntegrationTestBase(object):
         self.assertEqual(result[2][0], 377518399)
         self.assertEqual(result[3][0], 9223372036854775807)
 
+    def test_double_column_returns_float(self):
+        """Verify JDBC DOUBLE columns return Python float, not raw java.lang.Double.
+        Regression test for legacy baztian/jaydebeapi#243."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(self._double_create_sql())
+            try:
+                cursor.execute("INSERT INTO DOUBLE_TEST VALUES (3.14)")
+                cursor.execute("INSERT INTO DOUBLE_TEST VALUES (-1.5)")
+                cursor.execute("INSERT INTO DOUBLE_TEST VALUES (0.0)")
+                cursor.execute("SELECT val FROM DOUBLE_TEST ORDER BY val")
+                result = cursor.fetchall()
+            finally:
+                cursor.execute("DROP TABLE DOUBLE_TEST")
+        self.assertEqual(len(result), 3)
+        for row in result:
+            self.assertIsInstance(row[0], float)
+        self.assertAlmostEqual(result[0][0], -1.5)
+        self.assertAlmostEqual(result[1][0], 0.0)
+        self.assertAlmostEqual(result[2][0], 3.14)
+
     def test_numeric_precision_scale_combos(self):
         """Test various DECIMAL/NUMERIC precision/scale combinations."""
         with self.conn.cursor() as cursor:
@@ -460,6 +480,9 @@ class IntegrationTestBase(object):
                 cursor.execute("DROP TABLE NUMERIC_COMBO")
             except Exception:
                 pass
+
+    def _double_create_sql(self):
+        return "CREATE TABLE DOUBLE_TEST (val DOUBLE)"
 
     def test_execute_param_none(self):
         """Verify that Python None round-trips as SQL NULL via parameter binding."""
@@ -710,6 +733,9 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
     def setUpSql(self):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_postgres.sql'))
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert.sql'))
+
+    def _double_create_sql(self):
+        return "CREATE TABLE DOUBLE_TEST (val DOUBLE PRECISION)"
 
     def test_timestamp_microsecond_precision(self):
         """PostgreSQL-specific: verify microsecond precision on both TIMESTAMP
