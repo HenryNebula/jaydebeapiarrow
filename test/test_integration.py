@@ -303,6 +303,35 @@ class IntegrationTestBase(object):
         value = result[0]
         self.assertEqual(value, memoryview(binary_stuff))
 
+    def test_timestamp_ms_leading_zeros(self):
+        """Verify timestamps with leading-zero milliseconds round-trip correctly.
+        Regression test for legacy baztian/jaydebeapi#175 where .080 became .800
+        due to string-based timestamp parsing. The Arrow path uses integer
+        nanosecond representation, so this should be correct."""
+        with self.conn.cursor() as cursor:
+            # Insert timestamps with leading-zero milliseconds
+            cursor.execute(
+                "INSERT INTO ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE) "
+                "VALUES ('2020-01-05 11:02:14.080', 50, 1.0)")
+            cursor.execute(
+                "INSERT INTO ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE) "
+                "VALUES ('2020-01-07 03:25:20.743', 51, 2.0)")
+            cursor.execute(
+                "INSERT INTO ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE) "
+                "VALUES ('2020-06-01 00:00:00.009', 52, 3.0)")
+            cursor.execute(
+                "INSERT INTO ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE) "
+                "VALUES ('2020-03-15 12:00:00.007', 53, 4.0)")
+            cursor.execute(
+                "SELECT ACCOUNT_ID FROM ACCOUNT "
+                "WHERE ACCOUNT_NO >= 50 ORDER BY ACCOUNT_NO")
+            result = cursor.fetchall()
+        self.assertEqual(len(result), 4)
+        self.assertEqual(result[0][0], datetime(2020, 1, 5, 11, 2, 14, 80000))
+        self.assertEqual(result[1][0], datetime(2020, 1, 7, 3, 25, 20, 743000))
+        self.assertEqual(result[2][0], datetime(2020, 6, 1, 0, 0, 0, 9000))
+        self.assertEqual(result[3][0], datetime(2020, 3, 15, 12, 0, 0, 7000))
+
     def test_numeric_types(self):
         """Test that NUMERIC columns round-trip correctly, including NULL values
         and edge-case precision/scale values."""

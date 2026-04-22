@@ -677,3 +677,49 @@ class MockTest(unittest.TestCase):
         Types = jpype.java.sql.Types
         result = jaydebeapiarrow.DBAPITypeObject._map_jdbc_type_to_dbapi(Types.ROWID)
         self.assertIs(result, jaydebeapiarrow.ROWID)
+
+    # --- Timestamp millisecond leading-zero tests (legacy #175) ---
+
+    def test_timestamp_ms_leading_zero_080(self):
+        """Regression: .080 ms must not become .800 ms (legacy #175)."""
+        import jpype
+        LocalDateTime = jpype.JClass("java.time.LocalDateTime")
+        ldt = LocalDateTime.of(2020, 1, 5, 11, 2, 14, 80_000_000)
+        self.conn.jconn.mockTimestampResult(ldt)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0].microsecond, 80000)
+
+    def test_timestamp_ms_leading_zero_009(self):
+        """Timestamp with .009 ms — extreme leading-zero case."""
+        import jpype
+        LocalDateTime = jpype.JClass("java.time.LocalDateTime")
+        ldt = LocalDateTime.of(2020, 6, 1, 0, 0, 0, 9_000_000)
+        self.conn.jconn.mockTimestampResult(ldt)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0].microsecond, 9000)
+
+    def test_timestamp_ms_leading_zero_007(self):
+        """Timestamp with .007 ms — another leading-zero case."""
+        import jpype
+        LocalDateTime = jpype.JClass("java.time.LocalDateTime")
+        ldt = LocalDateTime.of(2020, 3, 15, 12, 0, 0, 7_000_000)
+        self.conn.jconn.mockTimestampResult(ldt)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0].microsecond, 7000)
+
+    def test_timestamp_ms_no_leading_zero_743(self):
+        """Timestamp with .743 ms — no leading zeros, should work correctly."""
+        import jpype
+        LocalDateTime = jpype.JClass("java.time.LocalDateTime")
+        ldt = LocalDateTime.of(2020, 1, 7, 3, 25, 20, 743_000_000)
+        self.conn.jconn.mockTimestampResult(ldt)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0].microsecond, 743000)
