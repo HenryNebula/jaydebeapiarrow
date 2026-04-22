@@ -332,6 +332,25 @@ class IntegrationTestBase(object):
             self.assertEqual(results[idx][0], expected,
                              f"Failed for microseconds={us}")
 
+    def test_binary_non_utf8_roundtrip(self):
+        """Verify that binary data containing non-UTF-8 bytes round-trips
+        correctly through the Arrow path. Regression test for legacy issue
+        baztian/jaydebeapi#147 where binary data was incorrectly decoded as
+        UTF-8 strings, corrupting byte values >= 0x80."""
+        test_data = bytes([0x00, 0x01, 0x02, 0x80, 0xff, 0xfe])
+        stmt = ("insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, "
+                "STUFF) values (?, ?, ?, ?)")
+        account_id = self.dbapi.Timestamp(2009, 9, 11, 14, 15, 22, 123450)
+        stuff = self.dbapi.Binary(test_data)
+        parms = (account_id, 20, 13.1, stuff)
+        with self.conn.cursor() as cursor:
+            cursor.execute(stmt, parms)
+            cursor.execute("select STUFF from ACCOUNT where ACCOUNT_NO = ?",
+                           (20,))
+            result = cursor.fetchone()
+        value = result[0]
+        self.assertEqual(bytes(value), test_data)
+
     def test_numeric_types(self):
         """Test that NUMERIC columns round-trip correctly, including NULL values
         and edge-case precision/scale values."""
