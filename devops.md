@@ -1,50 +1,36 @@
 # DevOps Guide: Release and Pre-Release Workflow
 
-This document outlines the workflow for creating pre-releases (Release Candidates) for User Acceptance Testing (UAT) and final releases using `bump2version`.
+This document outlines the workflow for creating pre-releases (Release Candidates) for User Acceptance Testing (UAT) and final releases using `bump-my-version`.
 
 ## Prerequisites
 
-Ensure you have `bump2version` installed (it's included in `dev-requirements.txt`):
+`bump-my-version` is included as a project dependency. Use `uv` to run it:
 
 ```bash
-pip install -r dev-requirements.txt
+uv sync
 ```
 
-## `.bumpversion.cfg` Configuration
+## `[tool.bumpversion]` Configuration
 
-To support this workflow, `.bumpversion.cfg` must be configured to handle release phases (`dev`, `rc`, `final`).
+The versioning configuration lives in `pyproject.toml` under `[tool.bumpversion]`. It handles release phases (`dev`, `rc`, `final`).
 
-Example configuration:
+```toml
+[tool.bumpversion]
+current_version = "2.1.1"
+commit = true
+tag = true
+parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)(?:(?P<release>[a-zA-Z]+)(?P<build>\\d+))?"
+serialize = [
+    "{major}.{minor}.{patch}{release}{build}",
+    "{major}.{minor}.{patch}",
+]
 
-```ini
-[bumpversion]
-current_version = 2.1.1
-commit = True
-tag = True
-# Add parsing and serialization rules for pre-releases globally
-parse = (?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)(?:(?P<release>[a-zA-Z]+)(?P<build>\d+))?
-serialize =
-	{major}.{minor}.{patch}{release}{build}
-	{major}.{minor}.{patch}
+[[tool.bumpversion.files]]
+filename = "pyproject.toml"
 
-[bumpversion:part:release]
-optional_value = final
-values =
-	dev
-	rc
-	final
-
-[bumpversion:part:build]
-
-[bumpversion:file:pyproject.toml]
-
-[bumpversion:file:jaydebeapiarrow/__init__.py]
-# Optional: customize parse/serialize here if needed, or rely on global config.
-
-[bumpversion:file:README.rst]
-search = - Next version - unreleased
-replace = - Next version - unreleased
-	- {new_version} - {now:%Y-%m-%d}
+[tool.bumpversion.parts.release]
+optional_value = "final"
+values = ["dev", "rc", "final"]
 ```
 
 ## Workflow: From Dev to UAT to Production
@@ -57,7 +43,7 @@ When the `dev` branch is ready for User Acceptance Testing (UAT), cut a Release 
 
 ```bash
 # This will update the version (e.g., from 2.1.1 to 2.1.2rc1), commit, and tag.
-bump2version release --new-version 2.1.2rc1
+uv run bump-my-version bump patch --new-version 2.1.2rc1
 ```
 
 Push the commit and the new tag to GitHub:
@@ -82,7 +68,7 @@ If UAT uncovers bugs, fix them on the `dev` branch, commit the fixes, and cut a 
 
 ```bash
 # This automatically bumps the build number (e.g., 2.1.2rc1 -> 2.1.2rc2), commits, and tags.
-bump2version build
+uv run bump-my-version bump build
 ```
 
 Push the changes and the new tag:
@@ -97,12 +83,12 @@ Once UAT is approved and the RC is confirmed stable:
 
 1. Merge the `dev` branch into `main`.
 2. Checkout the `main` branch.
-3. Run the bumpversion command to drop the `rc` suffix.
+3. Run the bump command to drop the `rc` suffix.
 
 ```bash
 # This transitions the version from 'rc' to 'final' (which is the optional_value and omitted).
 # Example: 2.1.2rc2 -> 2.1.2. It will commit and tag automatically.
-bump2version release
+uv run bump-my-version bump release
 ```
 
 Push the final release to GitHub:

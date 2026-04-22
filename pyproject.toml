@@ -35,6 +35,7 @@ dependencies = [
     "pyarrow>=16.0.0",
     "numpy",
     "cffi",
+    "bump-my-version",
 ]
 
 [project.urls]
@@ -45,6 +46,23 @@ dev = [
     "coverage>=4.5",
     "unittest-xml-reporting",
 ]
+
+[tool.bumpversion]
+current_version = "2.1.1"
+commit = true
+tag = true
+parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)(?:(?P<release>[a-zA-Z]+)(?P<build>\\d+))?"
+serialize = [
+    "{major}.{minor}.{patch}{release}{build}",
+    "{major}.{minor}.{patch}",
+]
+
+[[tool.bumpversion.files]]
+filename = "pyproject.toml"
+
+[tool.bumpversion.parts.release]
+optional_value = "final"
+values = ["dev", "rc", "final"]
 
 [tool.setuptools]
 packages = ["jaydebeapiarrow", "jaydebeapiarrow.lib"]
