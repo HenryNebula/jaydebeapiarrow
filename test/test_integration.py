@@ -332,6 +332,25 @@ class IntegrationTestBase(object):
             self.assertEqual(results[idx][0], expected,
                              f"Failed for microseconds={us}")
 
+    def test_binary_non_utf8_roundtrip(self):
+        """Verify that binary data containing non-UTF-8 bytes round-trips
+        correctly through the Arrow path. Regression test for legacy issue
+        baztian/jaydebeapi#147 where binary data was incorrectly decoded as
+        UTF-8 strings, corrupting byte values >= 0x80."""
+        test_data = bytes([0x00, 0x01, 0x02, 0x80, 0xff, 0xfe])
+        stmt = ("insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, "
+                "STUFF) values (?, ?, ?, ?)")
+        account_id = self.dbapi.Timestamp(2009, 9, 11, 14, 15, 22, 123450)
+        stuff = self.dbapi.Binary(test_data)
+        parms = (account_id, 20, 13.1, stuff)
+        with self.conn.cursor() as cursor:
+            cursor.execute(stmt, parms)
+            cursor.execute("select STUFF from ACCOUNT where ACCOUNT_NO = ?",
+                           (20,))
+            result = cursor.fetchone()
+        value = result[0]
+        self.assertEqual(bytes(value), test_data)
+
     def test_numeric_types(self):
         """Test that NUMERIC columns round-trip correctly, including NULL values
         and edge-case precision/scale values."""
@@ -700,6 +719,45 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
                              expected.replace(tzinfo=timezone.utc),
                              f"TIMESTAMPTZ failed for microseconds={us}")
 
+    def test_binary_non_utf8_roundtrip(self):
+        """PostgreSQL-specific: verify bytea columns preserve all 256 byte values
+        and non-UTF-8 sequences through the Arrow path. Regression test for
+        legacy issue baztian/jaydebeapi#147."""
+        # Full 256-byte spectrum (every possible byte value)
+        all_bytes = bytes(range(256))
+        # Non-UTF-8 sequences that commonly get corrupted
+        non_utf8_patterns = [
+            bytes([0x80, 0x81, 0xff, 0xfe]),
+            bytes([0xc0, 0x80]),  # overlong null
+            bytes([0xff, 0xff, 0xff]),
+            bytes([0x00, 0x00, 0x00, 0x00]),  # null bytes
+        ]
+        stmt = ("insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, "
+                "STUFF) values (?, ?, ?, ?)")
+        with self.conn.cursor() as cursor:
+            # Test full 256-byte spectrum
+            account_id = self.dbapi.Timestamp(2009, 9, 11, 14, 15, 22, 123450)
+            cursor.execute(stmt, (account_id, 20, Decimal('13.1'),
+                                  self.dbapi.Binary(all_bytes)))
+            # Test individual non-UTF-8 patterns
+            for idx, pattern in enumerate(non_utf8_patterns):
+                aid = self.dbapi.Timestamp(2010, 1, 1, 0, 0, 0, idx)
+                cursor.execute(stmt, (aid, 30 + idx, Decimal('1.0'),
+                                      self.dbapi.Binary(pattern)))
+            # Read back and verify
+            cursor.execute(
+                "select STUFF from ACCOUNT where ACCOUNT_NO = 20")
+            result = cursor.fetchone()
+            self.assertEqual(bytes(result[0]), all_bytes,
+                             "Full 256-byte spectrum mismatch")
+            for idx, pattern in enumerate(non_utf8_patterns):
+                cursor.execute(
+                    "select STUFF from ACCOUNT where ACCOUNT_NO = ?",
+                    (30 + idx,))
+                result = cursor.fetchone()
+                self.assertEqual(bytes(result[0]), pattern,
+                                 f"Pattern {idx} mismatch: {pattern!r}")
+
     def test_execute_timestamptz_roundtrip_non_utc_session(self):
         """Test TIMESTAMPTZ read/write with a non-UTC session timezone.
 
@@ -963,6 +1021,10 @@ class TrinoTest(IntegrationTestBase, unittest.TestCase):
     def test_timestamp_microsecond_precision(self):
         """Trino's JDBC driver does not support getObject(_, LocalDateTime.class)."""
         self.skipTest("Trino JDBC driver cannot convert TIMESTAMP to LocalDateTime")
+
+    def test_binary_non_utf8_roundtrip(self):
+        """Trino memory connector does not support VARBINARY in CTAS for non-UTF-8 bytes."""
+        self.skipTest("Trino memory connector does not support VARBINARY round-trip via CTAS")
 
 
 class OracleTest(IntegrationTestBase, unittest.TestCase):
@@ -1251,6 +1313,11 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
             result = cursor.fetchone()
         binary_stuff = b'abcdef'
         self.assertEqual(result[0], memoryview(binary_stuff))
+
+    def test_binary_non_utf8_roundtrip(self):
+        """Drill does not support CTAS with VARBINARY hex literals or
+        parameterized INSERT for binary data with non-UTF-8 bytes."""
+        self.skipTest("Drill cannot create VARBINARY with non-UTF-8 bytes via CTAS")
 
     def test_numeric_types(self):
         """Drill: seed NUMERIC_TEST via CTAS, then verify round-trip."""
