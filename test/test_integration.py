@@ -742,6 +742,31 @@ class HsqldbTest(IntegrationTestBase, unittest.TestCase):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_hsqldb.sql'))
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert.sql'))
 
+    def test_varchar_non_ascii_roundtrip(self):
+        """Verify that VARCHAR columns containing non-ASCII characters
+        round-trip correctly through the Arrow path. Regression test for
+        legacy issue baztian/jaydebeapi#176 where reading VARCHAR columns
+        with umlauts caused CharConversionException."""
+        test_cases = [
+            "Grüße aus München",
+            "café — résumé",
+            "こんにちは",
+            "Hello 🌍",
+        ]
+        stmt = ("insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, "
+                "PRODUCT_NAME) values (?, ?, ?, ?)")
+        with self.conn.cursor() as cursor:
+            for idx, text in enumerate(test_cases):
+                ts = self.dbapi.Timestamp(2024, 1, 15, 10, 0, 0, idx * 100000)
+                cursor.execute(stmt, (ts, 50 + idx, Decimal('1.0'), text))
+            cursor.execute(
+                "select PRODUCT_NAME from ACCOUNT "
+                "where ACCOUNT_NO >= 50 order by ACCOUNT_NO")
+            results = cursor.fetchall()
+        for idx, text in enumerate(test_cases):
+            self.assertEqual(results[idx][0], text,
+                             f"Failed for text: {text!r}")
+
 
 
 class PostgresTest(IntegrationTestBase, unittest.TestCase):

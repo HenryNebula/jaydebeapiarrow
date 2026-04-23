@@ -130,6 +130,12 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
             libs_path = os.path.pathsep.join(libs)
             args.append('-Djava.library.path=%s' % libs_path)
         
+        # Ensure UTF-8 encoding for consistent character handling across
+        # platforms.  Prevents CharConversionException when reading VARCHAR
+        # columns containing non-ASCII characters (e.g. umlauts) from databases
+        # whose JDBC driver falls back to the JVM default charset.
+        args.append('-Dfile.encoding=UTF-8')
+
         # Add-opens for Apache Arrow on Java 9+
         args.append('--add-opens=java.base/java.nio=ALL-UNNAMED')
 
