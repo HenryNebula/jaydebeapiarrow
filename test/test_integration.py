@@ -971,6 +971,12 @@ class MSSQLTest(IntegrationTestBase, unittest.TestCase):
             cursor.execute("USE test_db")
         super().tearDown()
 
+    def test_large_result_set_fetch(self):
+        self.skipTest("MSSQL requires different CREATE TABLE / INSERT syntax")
+
+    def test_large_result_set_fetch_arrow_batches(self):
+        self.skipTest("MSSQL requires different CREATE TABLE / INSERT syntax")
+
 
 class TrinoTest(IntegrationTestBase, unittest.TestCase):
 
@@ -1005,6 +1011,12 @@ class TrinoTest(IntegrationTestBase, unittest.TestCase):
             cursor.execute("DROP TABLE IF EXISTS NUMERIC_TEST")
             cursor.execute("DROP TABLE IF EXISTS NUMERIC_COMBO")
         self.conn.close()
+
+    def test_large_result_set_fetch(self):
+        self.skipTest("Trino memory connector does not support INSERT INTO ... VALUES")
+
+    def test_large_result_set_fetch_arrow_batches(self):
+        self.skipTest("Trino memory connector does not support INSERT INTO ... VALUES")
 
     def test_execute_reset_description_without_execute_result(self):
         """Trino memory connector does not support DELETE."""
@@ -1094,6 +1106,12 @@ class OracleTest(IntegrationTestBase, unittest.TestCase):
     def setUpSql(self):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_oracle.sql'))
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert_oracle.sql'))
+
+    def test_large_result_set_fetch(self):
+        self.skipTest("Oracle requires different CREATE TABLE / INSERT syntax")
+
+    def test_large_result_set_fetch_arrow_batches(self):
+        self.skipTest("Oracle requires different CREATE TABLE / INSERT syntax")
 
     def test_execute_types(self):
         """Oracle uses NUMBER(1) instead of BOOLEAN — VALID returns int not bool."""
@@ -1306,6 +1324,12 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
     def _query_table(self, cursor):
         cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING "
                        "from dfs.tmp.account")
+
+    def test_large_result_set_fetch(self):
+        self.skipTest("Drill does not support INSERT INTO ... VALUES")
+
+    def test_large_result_set_fetch_arrow_batches(self):
+        self.skipTest("Drill does not support INSERT INTO ... VALUES")
 
     def test_executemany(self):
         """Drill has no INSERT INTO ... VALUES — skip executemany test."""
