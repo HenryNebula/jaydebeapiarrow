@@ -383,6 +383,52 @@ class IntegrationTestBase(object):
         value = result[0]
         self.assertEqual(bytes(value), test_data)
 
+    def test_blob_non_utf8_roundtrip(self):
+        """Verify BLOB columns preserve non-UTF-8 bytes through Arrow path.
+        Regression test for legacy issue baztian/jaydebeapi#76 where BLOB
+        data returned as raw Java objects instead of Python bytes."""
+        test_data = bytes([0x00, 0x01, 0x02, 0x80, 0xff, 0xfe])
+        stmt = ("insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, "
+                "STUFF) values (?, ?, ?, ?)")
+        account_id = self.dbapi.Timestamp(2009, 9, 11, 14, 15, 22, 123450)
+        stuff = self.dbapi.Binary(test_data)
+        parms = (account_id, 20, 13.1, stuff)
+        with self.conn.cursor() as cursor:
+            cursor.execute(stmt, parms)
+            cursor.execute("select STUFF from ACCOUNT where ACCOUNT_NO = ?",
+                           (20,))
+            result = cursor.fetchone()
+        self.assertIsInstance(result[0], (bytes, memoryview))
+        self.assertEqual(bytes(result[0]), test_data)
+
+    def test_blob_all_byte_values_roundtrip(self):
+        """All 256 byte values should round-trip correctly through BLOB columns."""
+        test_data = bytes(range(256))
+        stmt = ("insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, "
+                "STUFF) values (?, ?, ?, ?)")
+        account_id = self.dbapi.Timestamp(2009, 9, 11, 14, 15, 22, 123450)
+        stuff = self.dbapi.Binary(test_data)
+        parms = (account_id, 21, 13.2, stuff)
+        with self.conn.cursor() as cursor:
+            cursor.execute(stmt, parms)
+            cursor.execute("select STUFF from ACCOUNT where ACCOUNT_NO = ?",
+                           (21,))
+            result = cursor.fetchone()
+        self.assertEqual(bytes(result[0]), test_data)
+
+    def test_blob_null_value(self):
+        """NULL BLOB values should return None, not crash or return garbage."""
+        stmt = ("insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, "
+                "STUFF) values (?, ?, ?, ?)")
+        account_id = self.dbapi.Timestamp(2009, 9, 11, 14, 15, 22, 123450)
+        parms = (account_id, 22, 13.3, None)
+        with self.conn.cursor() as cursor:
+            cursor.execute(stmt, parms)
+            cursor.execute("select STUFF from ACCOUNT where ACCOUNT_NO = ?",
+                           (22,))
+            result = cursor.fetchone()
+        self.assertIsNone(result[0])
+
     def test_numeric_types(self):
         """Test that NUMERIC columns round-trip correctly, including NULL values
         and edge-case precision/scale values."""
