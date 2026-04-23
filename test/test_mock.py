@@ -846,3 +846,34 @@ class MockTest(unittest.TestCase):
             result = cursor.fetchone()
         expected = datetime(2023, 5, 16, 18, 23, 15, 999999)
         self.assertEqual(result[0], expected)
+
+    # --- JPype API deprecation tests ---
+
+    def test_no_deprecated_thread_attachment_api(self):
+        """Verify that connect() does not use the deprecated
+        jpype.isThreadAttachedToJVM(). Regression test for legacy
+        baztian/jaydebeapi#203 where this triggered a DeprecationWarning."""
+        import inspect
+        import jaydebeapiarrow
+        source = inspect.getsource(jaydebeapiarrow)
+        self.assertNotIn('isThreadAttachedToJVM', source,
+                         'Deprecated jpype.isThreadAttachedToJVM() must not be used; '
+                         'use jpype.java.lang.Thread.isAttached() instead')
+
+    def test_connect_no_deprecation_warnings(self):
+        """Verify that connecting via the mock driver emits no
+        DeprecationWarnings from JPype. Regression test for legacy
+        baztian/jaydebeapi#203."""
+        import warnings
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            self.conn = jaydebeapiarrow.connect(
+                'org.jaydebeapi.mockdriver.MockDriver',
+                'jdbc:jaydebeapi://dummyurl')
+        jpype_warnings = [w for w in caught
+                          if issubclass(w.category, DeprecationWarning)
+                          and 'jpype' in str(w.message).lower()]
+        self.assertEqual(
+            len(jpype_warnings), 0,
+            f'Unexpected JPype deprecation warnings: '
+            f'{[str(w.message) for w in jpype_warnings]}')
