@@ -1070,6 +1070,10 @@ class MSSQLTest(IntegrationTestBase, unittest.TestCase):
     def _double_create_sql(self):
         return "CREATE TABLE DOUBLE_TEST (val FLOAT)"
 
+    def test_blob_null_value(self):
+        """MSSQL JDBC driver rejects NULL parameter binding for VARBINARY columns."""
+        self.skipTest("MSSQL JDBC driver does not support NULL for VARBINARY parameter binding")
+
 
 class TrinoTest(IntegrationTestBase, unittest.TestCase):
 
@@ -1349,8 +1353,8 @@ class DB2Test(IntegrationTestBase, unittest.TestCase):
         self.assertEqual(result, exp)
 
     def test_blob_null_value(self):
-        """MSSQL JDBC driver rejects NULL parameter binding for VARBINARY columns."""
-        self.skipTest("MSSQL JDBC driver does not support NULL for VARBINARY parameter binding")
+        """DB2 rejects NULL for VARBINARY parameter binding."""
+        self.skipTest("DB2 does not support NULL for VARBINARY parameter binding")
 
 
 class DrillTest(IntegrationTestBase, unittest.TestCase):
