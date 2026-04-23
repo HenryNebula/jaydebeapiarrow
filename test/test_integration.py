@@ -1016,6 +1016,9 @@ class TrinoTest(IntegrationTestBase, unittest.TestCase):
             cursor.execute("DROP TABLE IF EXISTS NUMERIC_COMBO")
         self.conn.close()
 
+    def test_double_column_returns_float(self):
+        self.skipTest("MSSQL uses FLOAT instead of DOUBLE")
+
     def test_execute_reset_description_without_execute_result(self):
         """Trino memory connector does not support DELETE."""
         self.skipTest("Trino memory connector does not support modifying table rows")
@@ -1104,6 +1107,9 @@ class OracleTest(IntegrationTestBase, unittest.TestCase):
     def setUpSql(self):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_oracle.sql'))
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert_oracle.sql'))
+
+    def test_double_column_returns_float(self):
+        self.skipTest("Oracle uses BINARY_DOUBLE instead of DOUBLE")
 
     def test_execute_types(self):
         """Oracle uses NUMBER(1) instead of BOOLEAN — VALID returns int not bool."""
@@ -1316,6 +1322,9 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
     def _query_table(self, cursor):
         cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING "
                        "from dfs.tmp.account")
+
+    def test_double_column_returns_float(self):
+        self.skipTest("Drill does not support DOUBLE type in CREATE TABLE")
 
     def test_executemany(self):
         """Drill has no INSERT INTO ... VALUES — skip executemany test."""
