@@ -36,3 +36,7 @@ if [ ! -f "$MOCK_JAR" ]; then
     exit 1
 fi
 echo "MockDriver build complete: $MOCK_JAR"
+
+# Also copy to test/jars/ so the default CLASSPATH (test/jars/*:test/mock-jars/*)
+# picks up the updated mock driver.
+cp "$MOCK_JAR" "$JARS_DIR/"
