@@ -303,6 +303,35 @@ class IntegrationTestBase(object):
         value = result[0]
         self.assertEqual(value, memoryview(binary_stuff))
 
+    def test_timestamp_microsecond_precision(self):
+        """Verify that TIMESTAMP columns preserve microsecond precision.
+        Regression test for legacy issue baztian/jaydebeapi#229 where certain
+        microsecond values (e.g. 90000) were corrupted during the Arrow
+        conversion."""
+        test_cases = [
+            (2009, 9, 11, 10, 0, 0, 200000),
+            (2009, 9, 11, 10, 0, 1, 90000),
+            (2009, 9, 11, 10, 0, 2, 123456),
+            (2009, 9, 11, 10, 0, 3, 0),
+            (2009, 9, 11, 10, 0, 4, 999999),
+        ]
+        stmt = ("insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE) "
+                "values (?, ?, ?)")
+        with self.conn.cursor() as cursor:
+            for idx, (y, mo, d, h, mi, s, us) in enumerate(test_cases):
+                ts = self.dbapi.Timestamp(y, mo, d, h, mi, s, us)
+                cursor.execute(stmt, (ts, 50 + idx, Decimal('1.0')))
+            cursor.execute(
+                "select ACCOUNT_ID from ACCOUNT "
+                "where ACCOUNT_NO >= 50 order by ACCOUNT_NO")
+            results = cursor.fetchall()
+        for idx, (y, mo, d, h, mi, s, us) in enumerate(test_cases):
+            expected = self._cast_datetime(
+                f'{y}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}:{s:02d}.{us:06d}',
+                r'%Y-%m-%d %H:%M:%S.%f')
+            self.assertEqual(results[idx][0], expected,
+                             f"Failed for microseconds={us}")
+
     def test_numeric_types(self):
         """Test that NUMERIC columns round-trip correctly, including NULL values
         and edge-case precision/scale values."""
@@ -467,6 +496,10 @@ class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
             datetime(2009, 9, 11, 14, 15, 22),
             19, Decimal('12.9'), Decimal('1'))
         ])
+
+    def test_timestamp_microsecond_precision(self):
+        """SQLite Xerial JDBC truncates microseconds via date_string_format."""
+        self.skipTest("SQLite Xerial JDBC truncates microsecond precision")
 
     def test_execute_and_fetch_parameter(self):
         with self.conn.cursor() as cursor:
@@ -634,6 +667,38 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
     def setUpSql(self):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_postgres.sql'))
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert.sql'))
+
+    def test_timestamp_microsecond_precision(self):
+        """PostgreSQL-specific: verify microsecond precision on both TIMESTAMP
+        and TIMESTAMPTZ columns."""
+        test_cases = [
+            (2009, 9, 11, 10, 0, 0, 200000),
+            (2009, 9, 11, 10, 0, 1, 90000),
+            (2009, 9, 11, 10, 0, 2, 123456),
+            (2009, 9, 11, 10, 0, 3, 0),
+            (2009, 9, 11, 10, 0, 4, 999999),
+        ]
+        stmt = ("insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, "
+                "ACCOUNT_ID_TZ) values (?, ?, ?, ?)")
+        with self.conn.cursor() as cursor:
+            cursor.execute("SET TIME ZONE 'UTC'")
+            for idx, (y, mo, d, h, mi, s, us) in enumerate(test_cases):
+                ts = self.dbapi.Timestamp(y, mo, d, h, mi, s, us)
+                cursor.execute(stmt, (ts, 50 + idx, Decimal('1.0'), ts))
+            cursor.execute(
+                "select ACCOUNT_ID, ACCOUNT_ID_TZ from ACCOUNT "
+                "where ACCOUNT_NO >= 50 order by ACCOUNT_NO")
+            results = cursor.fetchall()
+        for idx, (y, mo, d, h, mi, s, us) in enumerate(test_cases):
+            expected = self._cast_datetime(
+                f'{y}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}:{s:02d}.{us:06d}',
+                r'%Y-%m-%d %H:%M:%S.%f')
+            self.assertEqual(results[idx][0], expected,
+                             f"TIMESTAMP failed for microseconds={us}")
+            # TIMESTAMPTZ should be timezone-aware (UTC)
+            self.assertEqual(results[idx][1],
+                             expected.replace(tzinfo=timezone.utc),
+                             f"TIMESTAMPTZ failed for microseconds={us}")
 
     def test_execute_timestamptz_roundtrip_non_utc_session(self):
         """Test TIMESTAMPTZ read/write with a non-UTC session timezone.
@@ -894,6 +959,10 @@ class TrinoTest(IntegrationTestBase, unittest.TestCase):
         self.assertEqual(result[6], Decimal('12345.6789'))
         self.assertEqual(result[7], Decimal('0.1234'))
         self.assertEqual(result[8], Decimal('-99.99'))
+
+    def test_timestamp_microsecond_precision(self):
+        """Trino's JDBC driver does not support getObject(_, LocalDateTime.class)."""
+        self.skipTest("Trino JDBC driver cannot convert TIMESTAMP to LocalDateTime")
 
 
 class OracleTest(IntegrationTestBase, unittest.TestCase):
@@ -1316,6 +1385,10 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
             self._cast_datetime('2009-09-10 14:15:22.123', r'%Y-%m-%d %H:%M:%S.%f'),
             18, Decimal('12.40'), None)
         ])
+
+    def test_timestamp_microsecond_precision(self):
+        """Drill does not support TIMESTAMP with microsecond INSERT via parameterized queries."""
+        self.skipTest("Drill does not support parameterized TIMESTAMP INSERT")
 
 
 class PropertiesDriverArgsPassingTest(unittest.TestCase):

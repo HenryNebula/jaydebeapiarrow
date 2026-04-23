@@ -701,3 +701,69 @@ class MockTest(unittest.TestCase):
         Types = jpype.java.sql.Types
         result = jaydebeapiarrow.DBAPITypeObject._map_jdbc_type_to_dbapi(Types.ROWID)
         self.assertIs(result, jaydebeapiarrow.ROWID)
+
+    # --- Timestamp microsecond precision tests (legacy issue #229) ---
+
+    def test_timestamp_microsecond_precision_200000(self):
+        """200000 microseconds (0.200000s) should round-trip correctly.
+        Regression test for baztian/jaydebeapi#229."""
+        import jpype
+        LocalDateTime = jpype.JClass("java.time.LocalDateTime")
+        ldt = LocalDateTime.of(2023, 5, 16, 18, 23, 15, 200_000_000)
+        self.conn.jconn.mockTimestampResult(ldt)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        expected = datetime(2023, 5, 16, 18, 23, 15, 200000)
+        self.assertEqual(result[0], expected)
+
+    def test_timestamp_microsecond_precision_90000(self):
+        """90000 microseconds (0.090000s) should round-trip correctly.
+        Legacy bug caused this to become 900000 (extra zero).
+        Regression test for baztian/jaydebeapi#229."""
+        import jpype
+        LocalDateTime = jpype.JClass("java.time.LocalDateTime")
+        ldt = LocalDateTime.of(2023, 5, 16, 18, 23, 15, 90_000_000)
+        self.conn.jconn.mockTimestampResult(ldt)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        expected = datetime(2023, 5, 16, 18, 23, 15, 90000)
+        self.assertEqual(result[0], expected)
+
+    def test_timestamp_microsecond_precision_123456(self):
+        """123456 microseconds (0.123456s) should round-trip correctly.
+        Regression test for baztian/jaydebeapi#229."""
+        import jpype
+        LocalDateTime = jpype.JClass("java.time.LocalDateTime")
+        ldt = LocalDateTime.of(2023, 5, 16, 18, 23, 15, 123_456_000)
+        self.conn.jconn.mockTimestampResult(ldt)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        expected = datetime(2023, 5, 16, 18, 23, 15, 123456)
+        self.assertEqual(result[0], expected)
+
+    def test_timestamp_microsecond_precision_zero(self):
+        """0 microseconds should round-trip correctly."""
+        import jpype
+        LocalDateTime = jpype.JClass("java.time.LocalDateTime")
+        ldt = LocalDateTime.of(2023, 5, 16, 18, 23, 15, 0)
+        self.conn.jconn.mockTimestampResult(ldt)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        expected = datetime(2023, 5, 16, 18, 23, 15, 0)
+        self.assertEqual(result[0], expected)
+
+    def test_timestamp_microsecond_precision_999999(self):
+        """999999 microseconds (max precision) should round-trip correctly."""
+        import jpype
+        LocalDateTime = jpype.JClass("java.time.LocalDateTime")
+        ldt = LocalDateTime.of(2023, 5, 16, 18, 23, 15, 999_999_000)
+        self.conn.jconn.mockTimestampResult(ldt)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        expected = datetime(2023, 5, 16, 18, 23, 15, 999999)
+        self.assertEqual(result[0], expected)

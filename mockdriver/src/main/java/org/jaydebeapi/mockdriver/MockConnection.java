@@ -348,6 +348,22 @@ public abstract class MockConnection implements Connection {
     return capturedSetNullArgs;
   }
 
+  public final void mockTimestampResult(LocalDateTime localDateTime) throws SQLException {
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for timestamp)");
+    Mockito.when(mockPreparedStatement.getResultSet()).thenReturn(mockResultSet);
+    Mockito.when(mockResultSet.next()).thenReturn(true);
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    mockGeneralResultSetMetaData(mockMetaData, Types.TIMESTAMP);
+    Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
+    Timestamp timestamp = Timestamp.valueOf(localDateTime);
+    Mockito.when(mockResultSet.getObject(1, LocalDateTime.class)).thenReturn(localDateTime);
+    Mockito.when(mockResultSet.getTimestamp(1)).thenReturn(timestamp);
+    Mockito.when(mockResultSet.getObject(1)).thenReturn(localDateTime);
+    Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
+
   public final ResultSet verifyResultSet() {
     return Mockito.verify(mockResultSet);
   }
