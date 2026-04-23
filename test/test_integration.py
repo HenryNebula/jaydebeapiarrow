@@ -1348,6 +1348,10 @@ class DB2Test(IntegrationTestBase, unittest.TestCase):
         )
         self.assertEqual(result, exp)
 
+    def test_blob_null_value(self):
+        """MSSQL JDBC driver rejects NULL parameter binding for VARBINARY columns."""
+        self.skipTest("MSSQL JDBC driver does not support NULL for VARBINARY parameter binding")
+
 
 class DrillTest(IntegrationTestBase, unittest.TestCase):
 
@@ -1631,6 +1635,18 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
     def test_timestamp_microsecond_precision(self):
         """Drill does not support TIMESTAMP with microsecond INSERT via parameterized queries."""
         self.skipTest("Drill does not support parameterized TIMESTAMP INSERT")
+
+    def test_blob_non_utf8_roundtrip(self):
+        """Drill does not support parameterized INSERT."""
+        self.skipTest("Drill does not support parameterized INSERT queries")
+
+    def test_blob_all_byte_values_roundtrip(self):
+        """Drill does not support parameterized INSERT."""
+        self.skipTest("Drill does not support parameterized INSERT queries")
+
+    def test_blob_null_value(self):
+        """Drill does not support parameterized INSERT."""
+        self.skipTest("Drill does not support parameterized INSERT queries")
 
 
 class PropertiesDriverArgsPassingTest(unittest.TestCase):
