@@ -981,6 +981,9 @@ class MSSQLTest(IntegrationTestBase, unittest.TestCase):
             cursor.execute("USE test_db")
         super().tearDown()
 
+    def test_double_column_returns_float(self):
+        self.skipTest("MSSQL uses FLOAT instead of DOUBLE")
+
 
 class TrinoTest(IntegrationTestBase, unittest.TestCase):
 
@@ -1015,9 +1018,6 @@ class TrinoTest(IntegrationTestBase, unittest.TestCase):
             cursor.execute("DROP TABLE IF EXISTS NUMERIC_TEST")
             cursor.execute("DROP TABLE IF EXISTS NUMERIC_COMBO")
         self.conn.close()
-
-    def test_double_column_returns_float(self):
-        self.skipTest("MSSQL uses FLOAT instead of DOUBLE")
 
     def test_execute_reset_description_without_execute_result(self):
         """Trino memory connector does not support DELETE."""
