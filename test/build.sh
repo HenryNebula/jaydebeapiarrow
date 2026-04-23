@@ -39,4 +39,5 @@ echo "MockDriver build complete: $MOCK_JAR"
 
 # Also copy to test/jars/ so the default CLASSPATH (test/jars/*:test/mock-jars/*)
 # picks up the updated mock driver.
+mkdir -p "$JARS_DIR"
 cp "$MOCK_JAR" "$JARS_DIR/"
