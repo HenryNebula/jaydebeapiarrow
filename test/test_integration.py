@@ -668,6 +668,38 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_postgres.sql'))
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert.sql'))
 
+    def test_timestamp_microsecond_precision(self):
+        """PostgreSQL-specific: verify microsecond precision on both TIMESTAMP
+        and TIMESTAMPTZ columns."""
+        test_cases = [
+            (2009, 9, 11, 10, 0, 0, 200000),
+            (2009, 9, 11, 10, 0, 1, 90000),
+            (2009, 9, 11, 10, 0, 2, 123456),
+            (2009, 9, 11, 10, 0, 3, 0),
+            (2009, 9, 11, 10, 0, 4, 999999),
+        ]
+        stmt = ("insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, "
+                "ACCOUNT_ID_TZ) values (?, ?, ?, ?)")
+        with self.conn.cursor() as cursor:
+            cursor.execute("SET TIME ZONE 'UTC'")
+            for idx, (y, mo, d, h, mi, s, us) in enumerate(test_cases):
+                ts = self.dbapi.Timestamp(y, mo, d, h, mi, s, us)
+                cursor.execute(stmt, (ts, 50 + idx, Decimal('1.0'), ts))
+            cursor.execute(
+                "select ACCOUNT_ID, ACCOUNT_ID_TZ from ACCOUNT "
+                "where ACCOUNT_NO >= 50 order by ACCOUNT_NO")
+            results = cursor.fetchall()
+        for idx, (y, mo, d, h, mi, s, us) in enumerate(test_cases):
+            expected = self._cast_datetime(
+                f'{y}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}:{s:02d}.{us:06d}',
+                r'%Y-%m-%d %H:%M:%S.%f')
+            self.assertEqual(results[idx][0], expected,
+                             f"TIMESTAMP failed for microseconds={us}")
+            # TIMESTAMPTZ should be timezone-aware (UTC)
+            self.assertEqual(results[idx][1],
+                             expected.replace(tzinfo=timezone.utc),
+                             f"TIMESTAMPTZ failed for microseconds={us}")
+
     def test_execute_timestamptz_roundtrip_non_utc_session(self):
         """Test TIMESTAMPTZ read/write with a non-UTC session timezone.
 
