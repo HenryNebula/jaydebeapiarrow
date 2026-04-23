@@ -672,6 +672,18 @@ class MockTest(unittest.TestCase):
             with self.assertRaises(jaydebeapiarrow.NotSupportedError):
                 cursor.execute("dummy stmt", ([1, 2, 3],))
 
+    # --- BIGINT type test (legacy issue #6) ---
+
+    def test_bigint_returns_python_int(self):
+        """BIGINT columns should return Python int, not raw Java objects.
+        Regression test for baztian/jaydebeapi#6 where BIGINT was missing
+        from type converters and returned java.lang.Long."""
+        self.conn.jconn.mockType("BIGINT")
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertIsInstance(result[0], int)
+
     # --- DBAPITypeObject mapping tests ---
 
     def test_dbapi_type_other_maps_to_string(self):

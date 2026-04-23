@@ -303,6 +303,37 @@ class IntegrationTestBase(object):
         value = result[0]
         self.assertEqual(value, memoryview(binary_stuff))
 
+    def test_bigint_roundtrip(self):
+        """Verify that BIGINT columns return Python int values.
+        Regression test for legacy issue baztian/jaydebeapi#6 where BIGINT
+        was missing from type converters and returned raw java.lang.Long."""
+        INT_MAX = 2**31 - 1
+        BIG_VALUE = 9223372036854775807  # Long.MAX_VALUE
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "CREATE TABLE BIGINT_TEST (ID INTEGER, VAL BIGINT, "
+                "PRIMARY KEY (ID))")
+            try:
+                cursor.execute(
+                    "INSERT INTO BIGINT_TEST (ID, VAL) VALUES (1, ?)",
+                    (BIG_VALUE,))
+                cursor.execute(
+                    "INSERT INTO BIGINT_TEST (ID, VAL) VALUES (2, ?)",
+                    (INT_MAX,))
+                cursor.execute(
+                    "INSERT INTO BIGINT_TEST (ID, VAL) VALUES (3, NULL)")
+                cursor.execute(
+                    "SELECT VAL FROM BIGINT_TEST ORDER BY ID")
+                result = cursor.fetchall()
+            finally:
+                cursor.execute("DROP TABLE BIGINT_TEST")
+        self.assertEqual(len(result), 3)
+        self.assertIsInstance(result[0][0], int)
+        self.assertEqual(result[0][0], BIG_VALUE)
+        self.assertIsInstance(result[1][0], int)
+        self.assertEqual(result[1][0], INT_MAX)
+        self.assertIsNone(result[2][0])
+
     def test_numeric_types(self):
         """Test that NUMERIC columns round-trip correctly, including NULL values
         and edge-case precision/scale values."""
@@ -847,6 +878,10 @@ class TrinoTest(IntegrationTestBase, unittest.TestCase):
         """Trino memory connector does not support DELETE."""
         self.skipTest("Trino memory connector does not support modifying table rows")
 
+    def test_bigint_roundtrip(self):
+        """Trino memory connector does not support INSERT INTO ... VALUES."""
+        self.skipTest("Trino memory connector does not support INSERT INTO ... VALUES")
+
     def test_numeric_types(self):
         """Trino memory connector does not support INSERT INTO ... VALUES — use CTAS instead."""
         with self.conn.cursor() as cursor:
@@ -1011,6 +1046,10 @@ class OracleTest(IntegrationTestBase, unittest.TestCase):
             "PRIMARY KEY (ID))"
         )
 
+    def test_bigint_roundtrip(self):
+        """Oracle does not support the BIGINT data type."""
+        self.skipTest("Oracle does not support BIGINT — uses NUMBER instead")
+
 
 class DB2Test(IntegrationTestBase, unittest.TestCase):
 
@@ -1070,6 +1109,10 @@ class DB2Test(IntegrationTestBase, unittest.TestCase):
             valid, product_name
         )
         self.assertEqual(result, exp)
+
+    def test_bigint_roundtrip(self):
+        """DB2 requires schema-qualified table names for temporary tables."""
+        self.skipTest("DB2 does not support ad-hoc BIGINT table creation in this context")
 
 
 class DrillTest(IntegrationTestBase, unittest.TestCase):
@@ -1138,6 +1181,10 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
 
     def test_executemany(self):
         """Drill has no INSERT INTO ... VALUES — skip executemany test."""
+        self.skipTest("Drill does not support INSERT INTO ... VALUES")
+
+    def test_bigint_roundtrip(self):
+        """Drill has no INSERT INTO ... VALUES — skip BIGINT round-trip."""
         self.skipTest("Drill does not support INSERT INTO ... VALUES")
 
     def test_execute_types(self):
