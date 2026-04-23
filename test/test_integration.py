@@ -719,6 +719,45 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
                              expected.replace(tzinfo=timezone.utc),
                              f"TIMESTAMPTZ failed for microseconds={us}")
 
+    def test_binary_non_utf8_roundtrip(self):
+        """PostgreSQL-specific: verify bytea columns preserve all 256 byte values
+        and non-UTF-8 sequences through the Arrow path. Regression test for
+        legacy issue baztian/jaydebeapi#147."""
+        # Full 256-byte spectrum (every possible byte value)
+        all_bytes = bytes(range(256))
+        # Non-UTF-8 sequences that commonly get corrupted
+        non_utf8_patterns = [
+            bytes([0x80, 0x81, 0xff, 0xfe]),
+            bytes([0xc0, 0x80]),  # overlong null
+            bytes([0xff, 0xff, 0xff]),
+            bytes([0x00, 0x00, 0x00, 0x00]),  # null bytes
+        ]
+        stmt = ("insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, "
+                "STUFF) values (?, ?, ?, ?)")
+        with self.conn.cursor() as cursor:
+            # Test full 256-byte spectrum
+            account_id = self.dbapi.Timestamp(2009, 9, 11, 14, 15, 22, 123450)
+            cursor.execute(stmt, (account_id, 20, Decimal('13.1'),
+                                  self.dbapi.Binary(all_bytes)))
+            # Test individual non-UTF-8 patterns
+            for idx, pattern in enumerate(non_utf8_patterns):
+                aid = self.dbapi.Timestamp(2010, 1, 1, 0, 0, 0, idx)
+                cursor.execute(stmt, (aid, 30 + idx, Decimal('1.0'),
+                                      self.dbapi.Binary(pattern)))
+            # Read back and verify
+            cursor.execute(
+                "select STUFF from ACCOUNT where ACCOUNT_NO = 20")
+            result = cursor.fetchone()
+            self.assertEqual(bytes(result[0]), all_bytes,
+                             "Full 256-byte spectrum mismatch")
+            for idx, pattern in enumerate(non_utf8_patterns):
+                cursor.execute(
+                    "select STUFF from ACCOUNT where ACCOUNT_NO = ?",
+                    (30 + idx,))
+                result = cursor.fetchone()
+                self.assertEqual(bytes(result[0]), pattern,
+                                 f"Pattern {idx} mismatch: {pattern!r}")
+
     def test_execute_timestamptz_roundtrip_non_utc_session(self):
         """Test TIMESTAMPTZ read/write with a non-UTC session timezone.
 
