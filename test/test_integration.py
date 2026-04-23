@@ -924,6 +924,10 @@ class TrinoTest(IntegrationTestBase, unittest.TestCase):
         self.assertEqual(result[7], Decimal('0.1234'))
         self.assertEqual(result[8], Decimal('-99.99'))
 
+    def test_timestamp_microsecond_precision(self):
+        """Trino's JDBC driver does not support getObject(_, LocalDateTime.class)."""
+        self.skipTest("Trino JDBC driver cannot convert TIMESTAMP to LocalDateTime")
+
 
 class OracleTest(IntegrationTestBase, unittest.TestCase):
 
@@ -1345,6 +1349,10 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
             self._cast_datetime('2009-09-10 14:15:22.123', r'%Y-%m-%d %H:%M:%S.%f'),
             18, Decimal('12.40'), None)
         ])
+
+    def test_timestamp_microsecond_precision(self):
+        """Drill does not support TIMESTAMP with microsecond INSERT via parameterized queries."""
+        self.skipTest("Drill does not support parameterized TIMESTAMP INSERT")
 
 
 class PropertiesDriverArgsPassingTest(unittest.TestCase):
