@@ -798,6 +798,22 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
                 self.assertEqual(bytes(result[0]), pattern,
                                  f"Pattern {idx} mismatch: {pattern!r}")
 
+    def test_large_result_set_fetch_arrow_batches(self):
+        """PostgreSQL override: use DOUBLE PRECISION instead of DOUBLE."""
+        row_count = 5000
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE LARGE_ARROW_TEST (id INTEGER, val DOUBLE PRECISION)")
+            try:
+                batch = [(i, float(i) * 0.1) for i in range(row_count)]
+                cursor.executemany("INSERT INTO LARGE_ARROW_TEST VALUES (?, ?)", batch)
+                cursor.execute("SELECT id, val FROM LARGE_ARROW_TEST ORDER BY id")
+                total_rows = 0
+                for batch in cursor.fetch_arrow_batches():
+                    total_rows += batch.num_rows
+            finally:
+                cursor.execute("DROP TABLE LARGE_ARROW_TEST")
+        self.assertEqual(total_rows, row_count)
+
     def test_execute_timestamptz_roundtrip_non_utc_session(self):
         """Test TIMESTAMPTZ read/write with a non-UTC session timezone.
 
