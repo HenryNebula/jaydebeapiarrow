@@ -497,6 +497,10 @@ class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
             19, Decimal('12.9'), Decimal('1'))
         ])
 
+    def test_timestamp_microsecond_precision(self):
+        """SQLite Xerial JDBC truncates microseconds via date_string_format."""
+        self.skipTest("SQLite Xerial JDBC truncates microsecond precision")
+
     def test_execute_and_fetch_parameter(self):
         with self.conn.cursor() as cursor:
             cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING " \
