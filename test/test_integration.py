@@ -1022,6 +1022,10 @@ class TrinoTest(IntegrationTestBase, unittest.TestCase):
         """Trino's JDBC driver does not support getObject(_, LocalDateTime.class)."""
         self.skipTest("Trino JDBC driver cannot convert TIMESTAMP to LocalDateTime")
 
+    def test_binary_non_utf8_roundtrip(self):
+        """Trino memory connector does not support VARBINARY in CTAS for non-UTF-8 bytes."""
+        self.skipTest("Trino memory connector does not support VARBINARY round-trip via CTAS")
+
 
 class OracleTest(IntegrationTestBase, unittest.TestCase):
 
@@ -1309,6 +1313,21 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
             result = cursor.fetchone()
         binary_stuff = b'abcdef'
         self.assertEqual(result[0], memoryview(binary_stuff))
+
+    def test_binary_non_utf8_roundtrip(self):
+        """Drill: seed VARBINARY via CTAS with non-UTF-8 bytes, verify read path.
+        Drill does not support parameterized INSERT for binary data."""
+        jstmt = self.conn.jconn.createStatement()
+        jstmt.execute('DROP TABLE IF EXISTS dfs.tmp.binary_test')
+        jstmt.execute(
+            "CREATE TABLE dfs.tmp.binary_test AS "
+            "SELECT CAST(X'00010280FFFE' AS VARBINARY) AS STUFF "
+            "FROM (VALUES(1))")
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT STUFF FROM dfs.tmp.binary_test")
+            result = cursor.fetchone()
+        expected = bytes([0x00, 0x01, 0x02, 0x80, 0xff, 0xfe])
+        self.assertEqual(bytes(result[0]), expected)
 
     def test_numeric_types(self):
         """Drill: seed NUMERIC_TEST via CTAS, then verify round-trip."""
