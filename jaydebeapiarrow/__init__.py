@@ -541,6 +541,8 @@ class Cursor(object):
         support Arrow-stream parameter binding (e.g. Trino)."""
         import jpype
 
+        Types_NULL = jpype.java.sql.Types.NULL
+
         def _to_java(p):
             """Convert Python types to Java SQL types for setObject()."""
             if p is None:
@@ -569,11 +571,17 @@ class Cursor(object):
         if is_batch:
             for row in parameters:
                 for i, p in enumerate(row):
-                    statement.setObject(i + 1, _to_java(p))
+                    if p is None:
+                        statement.setNull(i + 1, Types_NULL)
+                    else:
+                        statement.setObject(i + 1, _to_java(p))
                 statement.addBatch()
         else:
             for i, p in enumerate(parameters):
-                statement.setObject(i + 1, _to_java(p))
+                if p is None:
+                    statement.setNull(i + 1, Types_NULL)
+                else:
+                    statement.setObject(i + 1, _to_java(p))
 
     def execute(self, operation, parameters=None):
         if self._connection._closed:

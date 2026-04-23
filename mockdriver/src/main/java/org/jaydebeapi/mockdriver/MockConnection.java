@@ -305,14 +305,22 @@ public abstract class MockConnection implements Connection {
   }
 
   private List<Object[]> capturedSetObjectArgs;
+  private List<Object[]> capturedSetNullArgs;
 
-  /** Set up a PreparedStatement that captures all setObject() calls.
+  /** Set up a PreparedStatement that captures all setObject() and setNull() calls.
    *  Rejects Arrow-stream binding to force the _set_stmt_parms_fallback path. */
   public final void mockSetObjectCapture() throws SQLException {
     capturedSetObjectArgs = new ArrayList<>();
-    // Throw by default so Arrow primary path fails and fallback is triggered
+    capturedSetNullArgs = new ArrayList<>();
+    // Throw by default so Arrow primary path fails and fallback is triggered,
+    // but allow setNull() through (needed for NULL parameter binding tests).
     PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class,
-        invocation -> { throw new UnsupportedOperationException("mockSetObjectCapture"); });
+        invocation -> {
+          if ("setNull".equals(invocation.getMethod().getName())) {
+            return null;
+          }
+          throw new UnsupportedOperationException("mockSetObjectCapture");
+        });
     Mockito.doReturn(true).when(mockPreparedStatement).execute();
     Mockito.doNothing().when(mockPreparedStatement).close();
     mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for setObject capture)");
@@ -325,11 +333,19 @@ public abstract class MockConnection implements Connection {
       capturedSetObjectArgs.add(new Object[]{invocation.getArgument(0), invocation.getArgument(1)});
       return null;
     }).when(mockPreparedStatement).setObject(Mockito.anyInt(), Mockito.any());
+    Mockito.doAnswer(invocation -> {
+      capturedSetNullArgs.add(new Object[]{invocation.getArgument(0), invocation.getArgument(1)});
+      return null;
+    }).when(mockPreparedStatement).setNull(Mockito.anyInt(), Mockito.anyInt());
     Mockito.doReturn(mockPreparedStatement).when(this).prepareStatement(Mockito.any());
   }
 
   public final List<Object[]> getCapturedSetObjectArgs() {
     return capturedSetObjectArgs;
+  }
+
+  public final List<Object[]> getCapturedSetNullArgs() {
+    return capturedSetNullArgs;
   }
 
   public final ResultSet verifyResultSet() {
