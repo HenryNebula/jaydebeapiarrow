@@ -448,6 +448,46 @@ class IntegrationTestBase(object):
             result = cursor.fetchone()
         self.assertIsNone(result[0])
 
+    def test_large_result_set_fetch(self):
+        """Verify that large result sets are fully transferred through the
+        Arrow batch path. Regression test for legacy baztian/jaydebeapi#47
+        where row-by-row JPype transfer made large fetches impractical."""
+        row_count = 10000
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE LARGE_TEST (id INTEGER, val VARCHAR(50))")
+            try:
+                # Insert rows in batches
+                insert_sql = "INSERT INTO LARGE_TEST VALUES (?, ?)"
+                batch = [(i, f"value_{i}") for i in range(row_count)]
+                cursor.executemany(insert_sql, batch)
+                # Fetch all and verify count
+                cursor.execute("SELECT id, val FROM LARGE_TEST ORDER BY id")
+                result = cursor.fetchall()
+            finally:
+                cursor.execute("DROP TABLE LARGE_TEST")
+        self.assertEqual(len(result), row_count)
+        # Verify first, middle, and last rows
+        self.assertEqual(result[0], (0, "value_0"))
+        self.assertEqual(result[row_count // 2], (row_count // 2, f"value_{row_count // 2}"))
+        self.assertEqual(result[-1], (row_count - 1, f"value_{row_count - 1}"))
+
+    def test_large_result_set_fetch_arrow_batches(self):
+        """Verify fetch_arrow_batches correctly yields all batches for large
+        result sets. Regression test for legacy baztian/jaydebeapi#47."""
+        row_count = 5000
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE LARGE_ARROW_TEST (id INTEGER, val DOUBLE)")
+            try:
+                batch = [(i, float(i) * 0.1) for i in range(row_count)]
+                cursor.executemany("INSERT INTO LARGE_ARROW_TEST VALUES (?, ?)", batch)
+                cursor.execute("SELECT id, val FROM LARGE_ARROW_TEST ORDER BY id")
+                total_rows = 0
+                for batch in cursor.fetch_arrow_batches():
+                    total_rows += batch.num_rows
+            finally:
+                cursor.execute("DROP TABLE LARGE_ARROW_TEST")
+        self.assertEqual(total_rows, row_count)
+
 class SqliteTestBase(IntegrationTestBase):
 
     def setUpSql(self):

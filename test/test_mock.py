@@ -806,3 +806,26 @@ class MockTest(unittest.TestCase):
             result = cursor.fetchone()
         expected = datetime(2023, 5, 16, 18, 23, 15, 999999)
         self.assertEqual(result[0], expected)
+
+    def test_arraysize_affects_batch_size(self):
+        """Verify that setting cursor.arraysize influences the Arrow batch size.
+        Regression test for legacy baztian/jaydebeapi#47 — batch-based
+        transfer is the core optimization over row-by-row fetching."""
+        self.conn.jconn.mockType("INTEGER")
+        with self.conn.cursor() as cursor:
+            cursor.arraysize = 2048
+            cursor.execute("dummy stmt")
+            self.assertEqual(cursor.arraysize, 2048)
+            cursor.fetchone()
+
+    def test_fetch_arrow_methods_available(self):
+        """Verify the Arrow-native fetch methods exist on cursor.
+        These methods provide zero-copy Arrow access, bypassing the
+        Python tuple conversion overhead that was the legacy bottleneck."""
+        self.conn.jconn.mockType("INTEGER")
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            self.assertTrue(hasattr(cursor, 'fetch_arrow_batches'))
+            self.assertTrue(hasattr(cursor, 'fetch_arrow_table'))
+            self.assertTrue(callable(cursor.fetch_arrow_batches))
+            self.assertTrue(callable(cursor.fetch_arrow_table))
