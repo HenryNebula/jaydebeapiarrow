@@ -724,6 +724,10 @@ class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
             "PRIMARY KEY (ID))"
         )
 
+    def test_timestamp_subsecond_leading_zeros(self):
+        """SQLite Xerial JDBC truncates microseconds via date_string_format."""
+        self.skipTest("SQLite Xerial JDBC truncates microsecond precision")
+
 class HsqldbTest(IntegrationTestBase, unittest.TestCase):
 
     def connect(self):
@@ -948,10 +952,6 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
         # ACCOUNT_ID_TZ (TIMESTAMPTZ) should be timezone-aware (UTC)
         self.assertEqual(result[1], datetime(2024, 6, 15, 10, 30, 0, tzinfo=timezone.utc))
         self.assertIsNotNone(result[1].tzinfo)
-
-    def test_timestamp_subsecond_leading_zeros(self):
-        """SQLite Xerial JDBC truncates microseconds via date_string_format."""
-        self.skipTest("SQLite Xerial JDBC truncates microsecond precision")
 
 
 class MySQLTest(IntegrationTestBase, unittest.TestCase):
