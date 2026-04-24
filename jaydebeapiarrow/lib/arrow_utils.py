@@ -18,6 +18,9 @@ def fetch_next_batch(it):
     Fetches the next batch from the ArrowVectorIterator 'it'.
     Returns a list of rows (tuples).
     Returns empty list if iterator is exhausted.
+
+    When the iterator is exhausted, it is automatically closed to release
+    the Arrow allocator and JDBC resources.
     """
     if it.hasNext():
         try:
@@ -33,6 +36,12 @@ def fetch_next_batch(it):
             return rows
         finally:
             root.clear()
+    else:
+        # Iterator exhausted — close to release Arrow allocator and JDBC resources
+        try:
+            it.close()
+        except Exception:
+            pass
     return []
 
 
@@ -51,7 +60,6 @@ def _find_decimal_conversion_message(exc):
 
 
 def read_rows_from_arrow_iterator(it, nrows=-1):
-    root = None
     rows = []
 
     nrows_remaining = nrows
@@ -60,25 +68,31 @@ def read_rows_from_arrow_iterator(it, nrows=-1):
         for root in it:
             if root is None:
                 break
-            batch = pa.jvm.record_batch(root).to_pylist()
-            _rows = [tuple(r.values()) for r in batch]
-            if nrows_remaining > 0:
-                _rows = _rows[:min(len(_rows), nrows_remaining)]
-                nrows_remaining -= len(_rows)
-            else:
-                if nrows > 0:
-                    break
-            rows.extend(_rows)
-    
+            try:
+                batch = pa.jvm.record_batch(root).to_pylist()
+                _rows = [tuple(r.values()) for r in batch]
+                if nrows_remaining > 0:
+                    _rows = _rows[:min(len(_rows), nrows_remaining)]
+                    nrows_remaining -= len(_rows)
+                else:
+                    if nrows > 0:
+                        break
+                rows.extend(_rows)
+            finally:
+                root.clear()
+
     except Exception as e:
         traceback.print_exc()
         print(f"Error converting iterator to rows: {e}")
         raise e
-    
+
     finally:
-        if root is not None:
-            root.clear()
-    
+        # Close iterator to release Arrow allocator and JDBC resources
+        try:
+            it.close()
+        except Exception:
+            pass
+
     if nrows > 0:
         assert nrows >= len(rows), f"Mismatched number rows: {len(rows)} (expected {nrows})"
     return rows

@@ -647,17 +647,19 @@ class Cursor(object):
             self._buffer.extend(rows)
             return self._buffer.pop(0)
 
+        # Iterator exhausted and closed by fetch_next_batch
+        self._iter = None
         return None
 
     def fetchmany(self, size=None):
         if not self._rs:
             raise Error()
-        
+
         if size is None:
             size = self.arraysize
-        
+
         assert size > 0, f"Fetchmany expects positive size other than size={size}."
-        
+
         result = []
         while len(result) < size:
             if self._buffer:
@@ -669,22 +671,24 @@ class Cursor(object):
                 it = self._get_iter()
                 rows = fetch_next_batch(it)
                 if not rows:
+                    # Iterator exhausted and closed by fetch_next_batch
+                    self._iter = None
                     break
                 self._buffer.extend(rows)
-        
+
         return result
 
     def fetchall(self):
         if not self._rs:
             raise Error()
-        
+
         result = []
         if self._buffer:
             result.extend(self._buffer)
             self._buffer = []
-            
+
         it = self._get_iter()
-        
+
         # We can implement a more efficient fetchall if we want to avoid python loops for buffering,
         # but reusing fetch_next_batch is simpler.
         while True:
@@ -692,7 +696,9 @@ class Cursor(object):
             if not rows:
                 break
             result.extend(rows)
-            
+
+        # Iterator exhausted and closed by fetch_next_batch
+        self._iter = None
         return result
 
     # optional nextset() unsupported
@@ -731,12 +737,20 @@ class Cursor(object):
         import pyarrow as pa
         it = self._get_iter()
 
-        while it.hasNext():
-            root = it.next()
+        try:
+            while it.hasNext():
+                root = it.next()
+                try:
+                    yield pa.jvm.record_batch(root)
+                finally:
+                    root.clear()
+        finally:
+            # Close iterator to release Arrow allocator and JDBC resources
+            self._iter = None
             try:
-                yield pa.jvm.record_batch(root)
-            finally:
-                root.clear()
+                it.close()
+            except Exception:
+                pass
 
     def fetch_arrow_table(self):
         """
