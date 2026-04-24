@@ -441,11 +441,13 @@ jobs:
         python -m pip install tox tox-gh-actions
     - name: Test with tox (mock + hsqldb + postgres + mysql)
       run: |
+        echo "JPype1==1.5.2" > /tmp/java8-constraints.txt
         tox -e py314-driver-mock
         tox -e py314-driver-hsqldb
         tox -e py314-driver-postgres
         tox -e py314-driver-mysql
       env:
+        PIP_CONSTRAINT: /tmp/java8-constraints.txt
         JY_PG_HOST: localhost
         JY_PG_PORT: "5432"
         JY_PG_DB: test_db
