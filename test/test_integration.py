@@ -604,6 +604,68 @@ class HsqldbTest(IntegrationTestBase, unittest.TestCase):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_hsqldb.sql'))
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert.sql'))
 
+    def test_fetchall_returns_complete_resultset(self):
+        """Verify fetchall() returns all rows (legacy #219: incomplete resultset)."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE test_rowcount (id INT, val VARCHAR(10))")
+            try:
+                # Insert 200 rows
+                for i in range(200):
+                    cursor.execute(
+                        "INSERT INTO test_rowcount (id, val) VALUES (?, ?)",
+                        [i, f"row_{i}"]
+                    )
+                cursor.execute("SELECT id, val FROM test_rowcount ORDER BY id")
+                rows = cursor.fetchall()
+            finally:
+                cursor.execute("DROP TABLE test_rowcount")
+        self.assertEqual(len(rows), 200)
+        self.assertEqual(rows[0][0], 0)
+        self.assertEqual(rows[199][0], 199)
+
+    def test_fetchmany_returns_complete_resultset(self):
+        """Verify fetchmany() returns all rows across chunks (legacy #219)."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE test_rowcount (id INT, val VARCHAR(10))")
+            try:
+                for i in range(150):
+                    cursor.execute(
+                        "INSERT INTO test_rowcount (id, val) VALUES (?, ?)",
+                        [i, f"row_{i}"]
+                    )
+                cursor.execute("SELECT id, val FROM test_rowcount ORDER BY id")
+                cursor.arraysize = 30
+                all_rows = []
+                while True:
+                    batch = cursor.fetchmany(30)
+                    if not batch:
+                        break
+                    all_rows.extend(batch)
+            finally:
+                cursor.execute("DROP TABLE test_rowcount")
+        self.assertEqual(len(all_rows), 150)
+
+    def test_fetchone_returns_complete_resultset(self):
+        """Verify fetchone() returns all rows one at a time (legacy #219)."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE test_rowcount (id INT, val VARCHAR(10))")
+            try:
+                for i in range(50):
+                    cursor.execute(
+                        "INSERT INTO test_rowcount (id, val) VALUES (?, ?)",
+                        [i, f"row_{i}"]
+                    )
+                cursor.execute("SELECT id, val FROM test_rowcount ORDER BY id")
+                all_rows = []
+                while True:
+                    row = cursor.fetchone()
+                    if row is None:
+                        break
+                    all_rows.append(row)
+            finally:
+                cursor.execute("DROP TABLE test_rowcount")
+        self.assertEqual(len(all_rows), 50)
+
 
 class PostgresTest(IntegrationTestBase, unittest.TestCase):
 

@@ -677,3 +677,53 @@ class MockTest(unittest.TestCase):
         Types = jpype.java.sql.Types
         result = jaydebeapiarrow.DBAPITypeObject._map_jdbc_type_to_dbapi(Types.ROWID)
         self.assertIs(result, jaydebeapiarrow.ROWID)
+
+    def test_fetchall_returns_all_rows(self):
+        """Verify fetchall() returns every row across multiple Arrow batches."""
+        self.conn.jconn.mockMultiRowIntegerResult(250)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            rows = cursor.fetchall()
+        self.assertEqual(len(rows), 250)
+        self.assertEqual([r[0] for r in rows], list(range(250)))
+
+    def test_fetchmany_returns_all_rows(self):
+        """Verify fetchmany() can retrieve all rows in chunks."""
+        self.conn.jconn.mockMultiRowIntegerResult(200)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            cursor.arraysize = 50
+            all_rows = []
+            while True:
+                batch = cursor.fetchmany(50)
+                if not batch:
+                    break
+                all_rows.extend(batch)
+        self.assertEqual(len(all_rows), 200)
+        self.assertEqual([r[0] for r in all_rows], list(range(200)))
+
+    def test_fetchone_returns_all_rows(self):
+        """Verify fetchone() can retrieve all rows one at a time."""
+        self.conn.jconn.mockMultiRowIntegerResult(100)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            all_rows = []
+            while True:
+                row = cursor.fetchone()
+                if row is None:
+                    break
+                all_rows.append(row)
+        self.assertEqual(len(all_rows), 100)
+        self.assertEqual([r[0] for r in all_rows], list(range(100)))
+
+    def test_fetchall_across_batch_boundary(self):
+        """Verify rows straddling Arrow batch boundaries are not lost."""
+        # Use a row count that doesn't align with default batch size (1024)
+        self.conn.jconn.mockMultiRowIntegerResult(1025)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            rows = cursor.fetchall()
+        self.assertEqual(len(rows), 1025)
+        self.assertEqual(rows[0][0], 0)
+        self.assertEqual(rows[1023][0], 1023)
+        self.assertEqual(rows[1024][0], 1024)

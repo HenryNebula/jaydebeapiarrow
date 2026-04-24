@@ -332,6 +332,23 @@ public abstract class MockConnection implements Connection {
     return capturedSetObjectArgs;
   }
 
+  public final void mockMultiRowIntegerResult(int numRows) throws SQLException {
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for multi-row INTEGER)");
+    Mockito.when(mockPreparedStatement.getResultSet()).thenReturn(mockResultSet);
+
+    final int[] rowCounter = {0};
+    Mockito.when(mockResultSet.next()).thenAnswer(invocation -> rowCounter[0]++ < numRows);
+    Mockito.when(mockResultSet.getObject(1)).thenAnswer(invocation -> rowCounter[0] - 1);
+    Mockito.when(mockResultSet.getInt(1)).thenAnswer(invocation -> rowCounter[0] - 1);
+
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    mockGeneralResultSetMetaData(mockMetaData, Types.INTEGER);
+    Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
+    Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
+
   public final ResultSet verifyResultSet() {
     return Mockito.verify(mockResultSet);
   }
