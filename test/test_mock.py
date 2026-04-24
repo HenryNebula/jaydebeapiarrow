@@ -1045,3 +1045,61 @@ class MockTest(unittest.TestCase):
             # Restore the original API
             if original is not None:
                 jpype.isJVMStarted = original
+
+    # --- JPype field reflection API tests (legacy #111) ---
+
+    def test_java_sql_types_reflection_uses_standard_api(self):
+        """Verify java.sql.Types constants are accessed via standard Java
+        Reflection API (field.get/getModifiers/getName), not the deprecated
+        JPype-specific getStaticAttribute() which was removed in newer JPype."""
+        import jpype
+        Types = jpype.java.sql.Types
+        fields = Types.class_.getFields()
+        # Verify we can iterate fields using standard Reflection
+        static_public_fields = {}
+        for field in fields:
+            modifiers = field.getModifiers()
+            if jpype.java.lang.reflect.Modifier.isStatic(modifiers) and \
+               jpype.java.lang.reflect.Modifier.isPublic(modifiers):
+                value = int(field.get(None))
+                static_public_fields[field.getName()] = value
+        # Spot-check well-known constants
+        self.assertEqual(static_public_fields['INTEGER'], 4)
+        self.assertEqual(static_public_fields['VARCHAR'], 12)
+        self.assertEqual(static_public_fields['TIMESTAMP'], 93)
+        self.assertEqual(static_public_fields['DECIMAL'], 3)
+        self.assertEqual(static_public_fields['NUMERIC'], 2)
+
+    def test_jdbc_type_mapping_populates_correctly(self):
+        """Verify _map_jdbc_type_to_dbapi builds the mapping using
+        standard Reflection (not getStaticAttribute)."""
+        import jpype
+        Types = jpype.java.sql.Types
+        # Trigger mapping population
+        result = jaydebeapiarrow.DBAPITypeObject._map_jdbc_type_to_dbapi(Types.INTEGER)
+        self.assertIs(result, jaydebeapiarrow.NUMBER)
+        # Verify mapping is populated (not empty dict)
+        self.assertIsNotNone(jaydebeapiarrow._jdbc_const_to_name)
+        self.assertGreater(len(jaydebeapiarrow._jdbc_const_to_name), 20)
+
+    def test_dbapi_type_eq_with_jdbc_constants(self):
+        """Verify DBAPITypeObject.__eq__ works with JDBC type constants
+        accessed through standard Java Reflection."""
+        import jpype
+        Types = jpype.java.sql.Types
+        # Trigger mapping population via a call to _map_jdbc_type_to_dbapi
+        jaydebeapiarrow.DBAPITypeObject._map_jdbc_type_to_dbapi(Types.INTEGER)
+        # Now __eq__ should work since _jdbc_const_to_name is populated
+        # Cast Java int to Python int for comparison
+        # (Java int's __eq__ doesn't delegate to our DBAPITypeObject.__eq__)
+        self.assertTrue(jaydebeapiarrow.NUMBER == int(Types.INTEGER))
+        self.assertTrue(jaydebeapiarrow.NUMBER == int(Types.BIGINT))
+        self.assertTrue(jaydebeapiarrow.NUMBER == int(Types.SMALLINT))
+        self.assertTrue(jaydebeapiarrow.NUMBER == int(Types.TINYINT))
+        # These should match STRING type
+        self.assertTrue(jaydebeapiarrow.STRING == int(Types.VARCHAR))
+        self.assertTrue(jaydebeapiarrow.STRING == int(Types.CHAR))
+        # These should match DATETIME type
+        self.assertTrue(jaydebeapiarrow.DATETIME == int(Types.TIMESTAMP))
+        # DATE has its own type object
+        self.assertTrue(jaydebeapiarrow.DATE == int(Types.DATE))
