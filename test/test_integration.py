@@ -303,6 +303,38 @@ class IntegrationTestBase(object):
         value = result[0]
         self.assertEqual(value, memoryview(binary_stuff))
 
+    def test_timestamp_subsecond_leading_zeros(self):
+        """Verify that TIMESTAMP columns preserve sub-second leading zeros.
+        Regression test for legacy baztian/jaydebeapi#44 where
+        2017-06-19 15:30:00.096965169 was displayed as
+        2017-06-19 15:30:00.960000 due to string-based parsing
+        stripping the leading zero. The Arrow path uses integer
+        nanosecond arithmetic, so this should be correct."""
+        test_cases = [
+            # (year, month, day, hour, minute, second, microsecond)
+            (2017, 6, 19, 15, 30, 0, 96965),    # .096965 — exact case from legacy #44
+            (2020, 1, 1, 0, 0, 0, 1),          # .000001 — minimal non-zero
+            (2021, 3, 15, 12, 0, 0, 1000),      # .001000 — leading zeros then trailing
+            (2019, 7, 4, 10, 30, 0, 99999),     # .099999 — leading zero + 9s
+            (2022, 1, 1, 0, 0, 0, 0),           # .000000 — zero sub-second
+        ]
+        stmt = ("insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE) "
+                "values (?, ?, ?)")
+        with self.conn.cursor() as cursor:
+            for idx, (y, mo, d, h, mi, s, us) in enumerate(test_cases):
+                ts = self.dbapi.Timestamp(y, mo, d, h, mi, s, us)
+                cursor.execute(stmt, (ts, 60 + idx, Decimal('1.0')))
+            cursor.execute(
+                "select ACCOUNT_ID from ACCOUNT "
+                "where ACCOUNT_NO >= 60 order by ACCOUNT_NO")
+            results = cursor.fetchall()
+        for idx, (y, mo, d, h, mi, s, us) in enumerate(test_cases):
+            expected = self._cast_datetime(
+                f'{y}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}:{s:02d}.{us:06d}',
+                r'%Y-%m-%d %H:%M:%S.%f')
+            self.assertEqual(results[idx][0], expected,
+                             f"Failed for microseconds={us}")
+
     def test_timestamp_microsecond_precision(self):
         """Verify that TIMESTAMP columns preserve microsecond precision.
         Regression test for legacy issue baztian/jaydebeapi#229 where certain
@@ -692,6 +724,10 @@ class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
             "PRIMARY KEY (ID))"
         )
 
+    def test_timestamp_subsecond_leading_zeros(self):
+        """SQLite Xerial JDBC truncates microseconds via date_string_format."""
+        self.skipTest("SQLite Xerial JDBC truncates microsecond precision")
+
 class HsqldbTest(IntegrationTestBase, unittest.TestCase):
 
     def connect(self):
@@ -1074,6 +1110,10 @@ class TrinoTest(IntegrationTestBase, unittest.TestCase):
         self.assertEqual(result[6], Decimal('12345.6789'))
         self.assertEqual(result[7], Decimal('0.1234'))
         self.assertEqual(result[8], Decimal('-99.99'))
+
+    def test_timestamp_subsecond_leading_zeros(self):
+        """Trino's JDBC driver truncates sub-second precision."""
+        self.skipTest("Trino JDBC driver truncates sub-second precision")
 
     def test_timestamp_microsecond_precision(self):
         """Trino's JDBC driver does not support getObject(_, LocalDateTime.class)."""
@@ -1537,6 +1577,10 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
             self._cast_datetime('2009-09-10 14:15:22.123', r'%Y-%m-%d %H:%M:%S.%f'),
             18, Decimal('12.40'), None)
         ])
+
+    def test_timestamp_subsecond_leading_zeros(self):
+        """Drill does not support parameterized TIMESTAMP INSERT."""
+        self.skipTest("Drill does not support parameterized TIMESTAMP INSERT")
 
     def test_timestamp_microsecond_precision(self):
         """Drill does not support TIMESTAMP with microsecond INSERT via parameterized queries."""

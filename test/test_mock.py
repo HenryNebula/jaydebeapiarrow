@@ -781,6 +781,55 @@ class MockTest(unittest.TestCase):
         result = jaydebeapiarrow.DBAPITypeObject._map_jdbc_type_to_dbapi(Types.ROWID)
         self.assertIs(result, jaydebeapiarrow.ROWID)
 
+    # --- Timestamp sub-second leading zero tests (legacy #44) ---
+
+    def test_timestamp_leading_zero_subsecond_096ms(self):
+        """Regression: .096 ms must not become .96 ms (legacy #44).
+        The legacy bug mangled 0.096965169 to 0.960000 by stripping the
+        leading zero during string-based parsing. Our Arrow path uses
+        integer nanosecond arithmetic via LocalDateTime.getNano()."""
+        import jpype
+        LocalDateTime = jpype.JClass("java.time.LocalDateTime")
+        ldt = LocalDateTime.of(2017, 6, 19, 15, 30, 0, 96_965_169)
+        self.conn.jconn.mockTimestampResult(ldt)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0].microsecond, 96965)
+
+    def test_timestamp_leading_zero_000001us(self):
+        """Timestamp with .000001 sub-seconds — minimal non-zero case."""
+        import jpype
+        LocalDateTime = jpype.JClass("java.time.LocalDateTime")
+        ldt = LocalDateTime.of(2020, 1, 1, 0, 0, 0, 1_000)
+        self.conn.jconn.mockTimestampResult(ldt)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0].microsecond, 1)
+
+    def test_timestamp_leading_zero_001ms(self):
+        """Timestamp with .001 ms — another leading-zero case."""
+        import jpype
+        LocalDateTime = jpype.JClass("java.time.LocalDateTime")
+        ldt = LocalDateTime.of(2021, 3, 15, 12, 0, 0, 1_000_000)
+        self.conn.jconn.mockTimestampResult(ldt)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0].microsecond, 1000)
+
+    def test_timestamp_leading_zero_099999ms(self):
+        """Timestamp with .099999 sub-seconds — leading zero + all 9s."""
+        import jpype
+        LocalDateTime = jpype.JClass("java.time.LocalDateTime")
+        ldt = LocalDateTime.of(2019, 7, 4, 10, 30, 0, 99_999_000)
+        self.conn.jconn.mockTimestampResult(ldt)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0].microsecond, 99999)
+
     # --- Timestamp microsecond precision tests (legacy issue #229) ---
 
     def test_timestamp_microsecond_precision_200000(self):
