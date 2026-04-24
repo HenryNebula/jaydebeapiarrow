@@ -1326,15 +1326,30 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
         cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING "
                        "from dfs.tmp.account")
 
-    def _double_create_sql(self):
-        return (
-            "CREATE TABLE DOUBLE_TEST AS "
-            "SELECT CAST(c1 AS DOUBLE) AS val FROM "
-            "(VALUES(3.14), (-1.5), (0.0)) AS t(c1)"
-        )
-
-    def _double_populate(self, cursor):
-        pass  # Table already populated via CTAS
+    def test_double_column_returns_float(self):
+        """Drill: use direct JDBC for DDL, cursor for SELECT."""
+        jstmt = self.conn.jconn.createStatement()
+        try:
+            jstmt.execute(
+                "CREATE TABLE dfs.tmp.DOUBLE_TEST AS "
+                "SELECT CAST(c1 AS DOUBLE) AS val FROM "
+                "(VALUES(3.14), (-1.5), (0.0)) AS t(c1)"
+            )
+        except Exception:
+            jstmt.execute("DROP TABLE IF EXISTS dfs.tmp.DOUBLE_TEST")
+            raise
+        try:
+            with self.conn.cursor() as cursor:
+                cursor.execute("SELECT val FROM dfs.tmp.DOUBLE_TEST ORDER BY val")
+                result = cursor.fetchall()
+        finally:
+            jstmt.execute("DROP TABLE IF EXISTS dfs.tmp.DOUBLE_TEST")
+        self.assertEqual(len(result), 3)
+        for row in result:
+            self.assertIsInstance(row[0], float)
+        self.assertAlmostEqual(result[0][0], -1.5)
+        self.assertAlmostEqual(result[1][0], 0.0)
+        self.assertAlmostEqual(result[2][0], 3.14)
 
     def test_executemany(self):
         """Drill has no INSERT INTO ... VALUES — skip executemany test."""
