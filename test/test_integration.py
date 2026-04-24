@@ -404,9 +404,7 @@ class IntegrationTestBase(object):
         with self.conn.cursor() as cursor:
             cursor.execute(self._double_create_sql())
             try:
-                cursor.execute("INSERT INTO DOUBLE_TEST VALUES (3.14)")
-                cursor.execute("INSERT INTO DOUBLE_TEST VALUES (-1.5)")
-                cursor.execute("INSERT INTO DOUBLE_TEST VALUES (0.0)")
+                self._double_populate(cursor)
                 cursor.execute("SELECT val FROM DOUBLE_TEST ORDER BY val")
                 result = cursor.fetchall()
             finally:
@@ -417,6 +415,11 @@ class IntegrationTestBase(object):
         self.assertAlmostEqual(result[0][0], -1.5)
         self.assertAlmostEqual(result[1][0], 0.0)
         self.assertAlmostEqual(result[2][0], 3.14)
+
+    def _double_populate(self, cursor):
+        cursor.execute("INSERT INTO DOUBLE_TEST VALUES (3.14)")
+        cursor.execute("INSERT INTO DOUBLE_TEST VALUES (-1.5)")
+        cursor.execute("INSERT INTO DOUBLE_TEST VALUES (0.0)")
 
     def test_numeric_precision_scale_combos(self):
         """Test various DECIMAL/NUMERIC precision/scale combinations."""
@@ -981,8 +984,8 @@ class MSSQLTest(IntegrationTestBase, unittest.TestCase):
             cursor.execute("USE test_db")
         super().tearDown()
 
-    def test_double_column_returns_float(self):
-        self.skipTest("MSSQL uses FLOAT instead of DOUBLE")
+    def _double_create_sql(self):
+        return "CREATE TABLE DOUBLE_TEST (val FLOAT)"
 
 
 class TrinoTest(IntegrationTestBase, unittest.TestCase):
@@ -1108,8 +1111,8 @@ class OracleTest(IntegrationTestBase, unittest.TestCase):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_oracle.sql'))
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert_oracle.sql'))
 
-    def test_double_column_returns_float(self):
-        self.skipTest("Oracle uses BINARY_DOUBLE instead of DOUBLE")
+    def _double_create_sql(self):
+        return "CREATE TABLE DOUBLE_TEST (val BINARY_DOUBLE)"
 
     def test_execute_types(self):
         """Oracle uses NUMBER(1) instead of BOOLEAN — VALID returns int not bool."""
@@ -1323,8 +1326,15 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
         cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING "
                        "from dfs.tmp.account")
 
-    def test_double_column_returns_float(self):
-        self.skipTest("Drill does not support DOUBLE type in CREATE TABLE")
+    def _double_create_sql(self):
+        return (
+            "CREATE TABLE DOUBLE_TEST AS "
+            "SELECT CAST(c1 AS DOUBLE) AS val FROM "
+            "(VALUES(3.14), (-1.5), (0.0)) AS t(c1)"
+        )
+
+    def _double_populate(self, cursor):
+        pass  # Table already populated via CTAS
 
     def test_executemany(self):
         """Drill has no INSERT INTO ... VALUES — skip executemany test."""
