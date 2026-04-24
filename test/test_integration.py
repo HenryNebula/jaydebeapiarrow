@@ -813,6 +813,22 @@ class HsqldbTest(IntegrationTestBase, unittest.TestCase):
             self.assertEqual(results[idx][0], text,
                              f"Failed for text: {text!r}")
 
+    def test_long_query_string_18k_characters(self):
+        """SQL queries with 18k+ characters must execute correctly.
+        Regression test for baztian/jaydebeapi#91 where long queries
+        caused failures in the legacy codebase."""
+        long_query = ("SELECT ACCOUNT_NO FROM ACCOUNT WHERE ACCOUNT_NO IN ("
+                      + ",".join(str(i) for i in range(5000)) + ")")
+        self.assertGreater(len(long_query), 18000,
+                           "Test query must exceed 18k characters")
+        with self.conn.cursor() as cursor:
+            cursor.execute(long_query)
+            result = cursor.fetchall()
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2,
+                         "Both ACCOUNT rows (18, 19) should match the IN clause")
+        returned_ids = sorted(row[0] for row in result)
+        self.assertEqual(returned_ids, [18, 19])
 
 
 class PostgresTest(IntegrationTestBase, unittest.TestCase):

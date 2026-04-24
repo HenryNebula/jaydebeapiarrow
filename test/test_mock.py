@@ -962,3 +962,19 @@ class MockTest(unittest.TestCase):
             cursor.execute("dummy stmt")
             result = cursor.fetchone()
         self.assertEqual(result[0], "Hello 🌍🌍")
+
+    # --- Long query string tests (legacy issue #91) ---
+
+    def test_long_query_string_18k_characters(self):
+        """SQL strings of 18k+ characters must pass through execute()
+        and return correct values. Regression test for
+        baztian/jaydebeapi#91 where long queries caused failures."""
+        self.conn.jconn.mockBigDecimalResult(1, 0)
+        long_query = ("SELECT * FROM t WHERE id IN ("
+                      + ",".join(str(i) for i in range(5000)) + ")")
+        self.assertGreater(len(long_query), 18000,
+                           "Test query must exceed 18k characters")
+        with self.conn.cursor() as cursor:
+            cursor.execute(long_query)
+            result = cursor.fetchone()
+        self.assertEqual(result[0], 1)
