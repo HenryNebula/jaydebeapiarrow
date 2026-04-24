@@ -866,6 +866,12 @@ class HsqldbTest(IntegrationTestBase, unittest.TestCase):
                 self.assertIsNone(cursor._iter)
                 self.assertEqual(cursor._buffer, [])
 
+    def test_description_returns_column_alias(self):
+        """cursor.description should return the AS alias, not the table column name."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT ACCOUNT_NO AS acct_num FROM ACCOUNT")
+            self.assertEqual(cursor.description[0][0], "ACCT_NUM")
+
 
 class PostgresTest(IntegrationTestBase, unittest.TestCase):
 
