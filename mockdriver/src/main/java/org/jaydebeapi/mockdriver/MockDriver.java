@@ -27,7 +27,7 @@ public class MockDriver implements Driver {
         if (!acceptsURL(url)) {
             return null;
         }
-        return Mockito.mock(MockConnection.class);
+        return Mockito.mock(MockConnection.class, Mockito.CALLS_REAL_METHODS);
     }
 
     @Override

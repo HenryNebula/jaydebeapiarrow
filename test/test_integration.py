@@ -398,6 +398,29 @@ class IntegrationTestBase(object):
         self.assertEqual(result[2][0], 377518399)
         self.assertEqual(result[3][0], 9223372036854775807)
 
+    def test_double_column_returns_float(self):
+        """Verify JDBC DOUBLE columns return Python float, not raw java.lang.Double.
+        Regression test for legacy baztian/jaydebeapi#243."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(self._double_create_sql())
+            try:
+                self._double_populate(cursor)
+                cursor.execute("SELECT val FROM DOUBLE_TEST ORDER BY val")
+                result = cursor.fetchall()
+            finally:
+                cursor.execute("DROP TABLE DOUBLE_TEST")
+        self.assertEqual(len(result), 3)
+        for row in result:
+            self.assertIsInstance(row[0], float)
+        self.assertAlmostEqual(result[0][0], -1.5)
+        self.assertAlmostEqual(result[1][0], 0.0)
+        self.assertAlmostEqual(result[2][0], 3.14)
+
+    def _double_populate(self, cursor):
+        cursor.execute("INSERT INTO DOUBLE_TEST VALUES (3.14)")
+        cursor.execute("INSERT INTO DOUBLE_TEST VALUES (-1.5)")
+        cursor.execute("INSERT INTO DOUBLE_TEST VALUES (0.0)")
+
     def test_numeric_precision_scale_combos(self):
         """Test various DECIMAL/NUMERIC precision/scale combinations."""
         with self.conn.cursor() as cursor:
@@ -460,6 +483,9 @@ class IntegrationTestBase(object):
                 cursor.execute("DROP TABLE NUMERIC_COMBO")
             except Exception:
                 pass
+
+    def _double_create_sql(self):
+        return "CREATE TABLE DOUBLE_TEST (val DOUBLE)"
 
     def test_execute_param_none(self):
         """Verify that Python None round-trips as SQL NULL via parameter binding."""
@@ -711,6 +737,9 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_postgres.sql'))
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert.sql'))
 
+    def _double_create_sql(self):
+        return "CREATE TABLE DOUBLE_TEST (val DOUBLE PRECISION)"
+
     def test_timestamp_microsecond_precision(self):
         """PostgreSQL-specific: verify microsecond precision on both TIMESTAMP
         and TIMESTAMPTZ columns."""
@@ -955,6 +984,9 @@ class MSSQLTest(IntegrationTestBase, unittest.TestCase):
             cursor.execute("USE test_db")
         super().tearDown()
 
+    def _double_create_sql(self):
+        return "CREATE TABLE DOUBLE_TEST (val FLOAT)"
+
 
 class TrinoTest(IntegrationTestBase, unittest.TestCase):
 
@@ -1078,6 +1110,9 @@ class OracleTest(IntegrationTestBase, unittest.TestCase):
     def setUpSql(self):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_oracle.sql'))
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert_oracle.sql'))
+
+    def _double_create_sql(self):
+        return "CREATE TABLE DOUBLE_TEST (val BINARY_DOUBLE)"
 
     def test_execute_types(self):
         """Oracle uses NUMBER(1) instead of BOOLEAN — VALID returns int not bool."""
@@ -1290,6 +1325,31 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
     def _query_table(self, cursor):
         cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING "
                        "from dfs.tmp.account")
+
+    def test_double_column_returns_float(self):
+        """Drill: use direct JDBC for DDL, cursor for SELECT."""
+        jstmt = self.conn.jconn.createStatement()
+        try:
+            jstmt.execute(
+                "CREATE TABLE dfs.tmp.DOUBLE_TEST AS "
+                "SELECT CAST(c1 AS DOUBLE) AS val FROM "
+                "(VALUES(3.14), (-1.5), (0.0)) AS t(c1)"
+            )
+        except Exception:
+            jstmt.execute("DROP TABLE IF EXISTS dfs.tmp.DOUBLE_TEST")
+            raise
+        try:
+            with self.conn.cursor() as cursor:
+                cursor.execute("SELECT val FROM dfs.tmp.DOUBLE_TEST ORDER BY val")
+                result = cursor.fetchall()
+        finally:
+            jstmt.execute("DROP TABLE IF EXISTS dfs.tmp.DOUBLE_TEST")
+        self.assertEqual(len(result), 3)
+        for row in result:
+            self.assertIsInstance(row[0], float)
+        self.assertAlmostEqual(result[0][0], -1.5)
+        self.assertAlmostEqual(result[1][0], 0.0)
+        self.assertAlmostEqual(result[2][0], 3.14)
 
     def test_executemany(self):
         """Drill has no INSERT INTO ... VALUES — skip executemany test."""
