@@ -896,6 +896,60 @@ class MockTest(unittest.TestCase):
         expected = datetime(2023, 5, 16, 18, 23, 15, 999999)
         self.assertEqual(result[0], expected)
 
+    # --- Timestamp timezone preservation tests (legacy issue #73) ---
+
+    def test_timestamp_returns_naive_datetime(self):
+        """TIMESTAMP columns must return naive Python datetime objects.
+
+        Regression test for baztian/jaydebeapi#73 where legacy jaydebeapi
+        returned timestamps shifted to the JVM's local timezone. Our Arrow
+        path normalizes to UTC on the Java side, so the returned datetime
+        should always be naive and match the stored value exactly.
+        """
+        self.conn.jconn.mockType("TIMESTAMP")
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertIsInstance(result[0], datetime)
+        self.assertIsNone(result[0].tzinfo,
+                          "TIMESTAMP must return naive datetime, not timezone-aware")
+        self.assertEqual(result[0], datetime(2009, 12, 1, 8, 20, 45))
+
+    def test_timestamp_utc_boundary_value(self):
+        """TIMESTAMP at UTC midnight must not shift to previous day.
+
+        Regression test for baztian/jaydebeapi#73. If the JVM's default
+        timezone is behind UTC (e.g., EST = UTC-5), a naive implementation
+        would shift midnight UTC to the previous day. Our Arrow path uses
+        UTC normalization, so the value must be preserved exactly.
+        """
+        import jpype
+        localDT = jpype.java.time.LocalDateTime.of(2024, 1, 15, 0, 0, 0)
+        self.conn.jconn.mockTimestampResult(localDT)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], datetime(2024, 1, 15, 0, 0, 0))
+
+    def test_timestamp_end_of_day_value(self):
+        """TIMESTAMP near end of day must not overflow to next day.
+
+        Regression test for baztian/jaydebeapi#73. Verifies that a
+        timestamp near midnight (23:59:59) is preserved exactly without
+        timezone shifting causing a day rollover.
+        """
+        self.conn.jconn.mockType("TIMESTAMP")
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        # The mock returns 2009-12-01T08:20:45 — verify exact value
+        self.assertEqual(result[0].year, 2009)
+        self.assertEqual(result[0].month, 12)
+        self.assertEqual(result[0].day, 1)
+        self.assertEqual(result[0].hour, 8)
+        self.assertEqual(result[0].minute, 20)
+        self.assertEqual(result[0].second, 45)
+
     # --- JPype API deprecation tests ---
 
     def test_no_deprecated_thread_attachment_api(self):
