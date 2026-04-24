@@ -926,3 +926,39 @@ class MockTest(unittest.TestCase):
             len(jpype_warnings), 0,
             f'Unexpected JPype deprecation warnings: '
             f'{[str(w.message) for w in jpype_warnings]}')
+
+    # --- Non-ASCII character round-trip tests (legacy issue #176) ---
+
+    def test_varchar_german_umlauts(self):
+        """VARCHAR columns with German umlauts must round-trip correctly.
+        Regression test for baztian/jaydebeapi#176 where reading VARCHAR
+        columns containing umlauts caused CharConversionException."""
+        self.conn.jconn.mockStringResult("Grüße aus München")
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], "Grüße aus München")
+
+    def test_varchar_cjk_characters(self):
+        """VARCHAR columns with CJK characters must round-trip correctly."""
+        self.conn.jconn.mockStringResult("你好世界")
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], "你好世界")
+
+    def test_varchar_mixed_scripts(self):
+        """VARCHAR columns with mixed scripts and symbols must round-trip correctly."""
+        self.conn.jconn.mockStringResult("café — résumé — naïve")
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], "café — résumé — naïve")
+
+    def test_varchar_emoji(self):
+        """VARCHAR columns with emoji must round-trip correctly."""
+        self.conn.jconn.mockStringResult("Hello 🌍🌍")
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], "Hello 🌍🌍")

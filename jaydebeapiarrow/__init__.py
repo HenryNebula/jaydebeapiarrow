@@ -130,6 +130,15 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
             libs_path = os.path.pathsep.join(libs)
             args.append('-Djava.library.path=%s' % libs_path)
         
+        # Known issue: some JDBC drivers (notably IBM Db2) use the JVM's
+        # default charset for string conversion.  When the default is not
+        # UTF-8, non-ASCII characters (German umlauts, CJK, emoji) cause
+        # CharConversionException during result-set traversal.  Users who
+        # encounter this should pass jvm_args=['-Dfile.encoding=UTF-8']
+        # when calling connect().
+        # TODO: document this encoding requirement in user-facing docs
+        # and consider exposing a dedicated encoding parameter in connect().
+
         # Add-opens for Apache Arrow on Java 9+
         args.append('--add-opens=java.base/java.nio=ALL-UNNAMED')
 

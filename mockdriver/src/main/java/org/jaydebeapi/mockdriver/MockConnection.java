@@ -60,6 +60,20 @@ public abstract class MockConnection implements Connection {
     Mockito.when(mockMetaData.isWritable(column)).thenReturn(true);
   }
 
+  public final void mockStringResult(String value) throws SQLException {
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for string)");
+    Mockito.when(mockPreparedStatement.getResultSet()).thenReturn(mockResultSet);
+    Mockito.when(mockResultSet.next()).thenReturn(true);
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    mockGeneralResultSetMetaData(mockMetaData, Types.VARCHAR);
+    Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
+    Mockito.when(mockResultSet.getObject(1)).thenReturn(value);
+    Mockito.when(mockResultSet.getString(1)).thenReturn(value);
+    Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
+
   public final void mockExceptionOnCommit(String className, String exceptionMessage)
       throws SQLException {
     Throwable exception = createException(className, exceptionMessage);
