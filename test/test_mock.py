@@ -794,6 +794,12 @@ class MockTest(unittest.TestCase):
         result = jaydebeapiarrow.DBAPITypeObject._map_jdbc_type_to_dbapi(Types.ROWID)
         self.assertIs(result, jaydebeapiarrow.ROWID)
 
+    def test_connect_failure_raises_database_error(self):
+        """Connection failure should raise DatabaseError, not raw Java exception."""
+        with self.assertRaises(jaydebeapiarrow.DatabaseError):
+            jaydebeapiarrow.connect('org.jaydebeapi.mockdriver.MockDriver',
+                                    'jdbc:jaydebeapi://fail-connect')
+
     # --- Timestamp sub-second leading zero tests (legacy #44) ---
 
     def test_timestamp_leading_zero_subsecond_096ms(self):

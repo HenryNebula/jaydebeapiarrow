@@ -1960,6 +1960,13 @@ class PropertiesDriverArgsPassingTest(unittest.TestCase):
         c = jaydebeapiarrow.connect(driver, url, driver_args)
         c.close()
 
+    def test_connect_bad_credentials_raises_database_error(self):
+        """Connection to non-existent HSQLDB server should raise DatabaseError."""
+        with self.assertRaises(jaydebeapiarrow.DatabaseError):
+            jaydebeapiarrow.connect('org.hsqldb.jdbcDriver',
+                                    'jdbc:hsqldb:hsql://localhost/nonexistent_db_invalid_port',
+                                    ['SA', ''])
+
 
 class JarPathSpacesIntegrationTest(unittest.TestCase):
     """Integration test for JAR paths containing spaces (issue #86).

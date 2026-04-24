@@ -27,6 +27,9 @@ public class MockDriver implements Driver {
         if (!acceptsURL(url)) {
             return null;
         }
+        if (url.contains("/fail-connect")) {
+            throw new SQLException("Simulated connection failure", "08001");
+        }
         return Mockito.mock(MockConnection.class, Mockito.CALLS_REAL_METHODS);
     }
 
