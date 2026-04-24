@@ -1016,3 +1016,32 @@ class MockTest(unittest.TestCase):
             cursor._close_last()
             cursor._close_last()
             self.assertIsNone(cursor._iter)
+
+    # --- JPype compatibility tests (legacy issue #253) ---
+
+    def test_is_jvm_started_with_api_present(self):
+        """_is_jvm_started() returns True when JVM is running via the standard API."""
+        import jpype
+        result = jaydebeapiarrow._is_jvm_started()
+        self.assertTrue(result, "JVM should be started during mock tests")
+
+    def test_is_jvm_started_fallback_without_public_api(self):
+        """_is_jvm_started() falls back to internal state when isJVMStarted is missing.
+
+        Simulates JPype versions (e.g. 1.6.0) that removed the public
+        ``jpype.isJVMStarted()`` API.  The helper must still return the
+        correct value by inspecting ``jpype._core._JVM_started``.
+        """
+        import jpype
+        # Save and remove the public API
+        original = getattr(jpype, 'isJVMStarted', None)
+        try:
+            delattr(jpype, 'isJVMStarted')
+            # JVM is running in this test, so fallback must return True
+            result = jaydebeapiarrow._is_jvm_started()
+            self.assertTrue(result,
+                             "Fallback must return True when JVM is running")
+        finally:
+            # Restore the original API
+            if original is not None:
+                jpype.isJVMStarted = original

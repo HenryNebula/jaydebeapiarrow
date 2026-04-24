@@ -44,6 +44,20 @@ from jaydebeapiarrow.lib.arrow_utils import \
     fetch_next_batch
 
 
+def _is_jvm_started():
+    """Check if the JPype JVM is started.
+
+    Compatible across JPype versions: uses ``jpype.isJVMStarted()`` when
+    available (JPype <1.7.1), and falls back to the internal state flag
+    for versions that removed the public API.
+    """
+    import jpype
+    if hasattr(jpype, 'isJVMStarted'):
+        return jpype.isJVMStarted()
+    # Fallback for JPype versions that removed the public API
+    return bool(getattr(getattr(jpype, '_core', None), '_JVM_started', False))
+
+
 def set_debug(enabled=True):
     """Enable or disable debug logging from the Java bridge (JUL FINE level).
 
@@ -58,8 +72,7 @@ def set_debug(enabled=True):
     Args:
         enabled: True to enable debug logging, False to disable.
     """
-    import jpype
-    if not jpype.isJVMStarted():
+    if not _is_jvm_started():
         return
     Level = jpype.JClass("java.util.logging.Level")
     target_level = Level.FINE if enabled else Level.INFO
@@ -112,7 +125,7 @@ def _handle_sql_exception_jpype():
 
 def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
     import jpype
-    if not jpype.isJVMStarted():
+    if not _is_jvm_started():
         args = []
         class_path = []
         if jars:
@@ -253,7 +266,7 @@ class DBAPITypeObject(object):
         global _jdbc_const_to_name
         if _jdbc_const_to_name is None:
             import jpype
-            if not jpype.isJVMStarted():
+            if not _is_jvm_started():
                 return None
             try:
                 Types = jpype.java.sql.Types
