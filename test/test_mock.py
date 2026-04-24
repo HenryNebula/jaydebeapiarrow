@@ -96,6 +96,26 @@ class MockTest(unittest.TestCase):
             result = cursor.fetchone()
         self.assertEqual(result[0], Decimal("1234.5"))
 
+    def test_bigint_type_returns_int(self):
+        """Verify JDBC BIGINT columns return Python int, not raw java.lang.Long.
+        Regression test for legacy baztian/jaydebeapi#63."""
+        self.conn.jconn.mockBigIntResult(377518399)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertIsInstance(result[0], int)
+        self.assertEqual(result[0], 377518399)
+
+    def test_bigint_edge_values(self):
+        """Verify BIGINT edge cases: zero, negative, min, max long values."""
+        for val in [0, -1, 9223372036854775807, -9223372036854775808]:
+            self.conn.jconn.mockBigIntResult(val)
+            with self.conn.cursor() as cursor:
+                cursor.execute("dummy stmt")
+                result = cursor.fetchone()
+            self.assertIsInstance(result[0], int)
+            self.assertEqual(result[0], val)
+
     def test_decimal_null_value(self):
         """SQL NULL in a DECIMAL column should return None, not crash or return 0."""
         self.conn.jconn.mockNullDecimalResult(10, 2)

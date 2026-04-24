@@ -374,6 +374,30 @@ class IntegrationTestBase(object):
         self.assertEqual(result[1][0], Decimal('99.99'))
         self.assertEqual(result[2][0], Decimal('100.00'))
 
+    def test_bigint_column_returns_int(self):
+        """Verify JDBC BIGINT columns return Python int, not raw java.lang.Long.
+        Regression test for legacy baztian/jaydebeapi#63."""
+        if type(self).__name__.startswith(('OracleTest', 'DrillTest')):
+            self.skipTest('BIGINT type not supported by this database')
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE BIGINT_TEST (val BIGINT)")
+            try:
+                cursor.execute("INSERT INTO BIGINT_TEST VALUES (0)")
+                cursor.execute("INSERT INTO BIGINT_TEST VALUES (377518399)")
+                cursor.execute("INSERT INTO BIGINT_TEST VALUES (-9223372036854775808)")
+                cursor.execute("INSERT INTO BIGINT_TEST VALUES (9223372036854775807)")
+                cursor.execute("SELECT val FROM BIGINT_TEST ORDER BY val")
+                result = cursor.fetchall()
+            finally:
+                cursor.execute("DROP TABLE BIGINT_TEST")
+        self.assertEqual(len(result), 4)
+        for row in result:
+            self.assertIsInstance(row[0], int)
+        self.assertEqual(result[0][0], -9223372036854775808)
+        self.assertEqual(result[1][0], 0)
+        self.assertEqual(result[2][0], 377518399)
+        self.assertEqual(result[3][0], 9223372036854775807)
+
     def test_numeric_precision_scale_combos(self):
         """Test various DECIMAL/NUMERIC precision/scale combinations."""
         with self.conn.cursor() as cursor:
