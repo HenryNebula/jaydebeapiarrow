@@ -1273,6 +1273,29 @@ class MockTest(unittest.TestCase):
         """lastrowid should be None after executemany (mock driver limitation: skip)."""
         self.skipTest("Mock driver executeBatch returns None; covered by integration test")
 
+    # --- Fork-safety tests (legacy issue #232) ---
+
+    def test_fork_after_connect_raises_error(self):
+        """Connecting in a forked process after JVM start must raise
+        InterfaceError. Regression test for baztian/jaydebeapi#232 where
+        JPype's native library was 'already loaded in another classloader'."""
+        import os
+        original_pid = jaydebeapiarrow._jvm_started_pid
+        try:
+            jaydebeapiarrow._jvm_started_pid = os.getpid() + 99999
+            with self.assertRaises(jaydebeapiarrow.InterfaceError) as ctx:
+                jaydebeapiarrow.connect('org.jaydebeapi.mockdriver.MockDriver',
+                                        'jdbc:jaydebeapi://dummyurl')
+            self.assertIn("forked process", str(ctx.exception))
+        finally:
+            jaydebeapiarrow._jvm_started_pid = original_pid
+
+    def test_connect_records_pid_at_jvm_start(self):
+        """After a successful connect(), _jvm_started_pid must match
+        the current process PID."""
+        import os
+        self.assertEqual(jaydebeapiarrow._jvm_started_pid, os.getpid())
+
 
 class JarPathSpacesTest(unittest.TestCase):
     """Tests for JAR file paths containing spaces (issue #86).

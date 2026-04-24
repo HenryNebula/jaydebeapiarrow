@@ -111,6 +111,8 @@ _handle_sql_exception = None
 
 old_jpype = False
 
+_jvm_started_pid = None
+
 def _handle_sql_exception_jpype():
     import jpype
     SQLException = jpype.java.sql.SQLException
@@ -130,6 +132,18 @@ def _handle_sql_exception_jpype():
 
 def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
     import jpype
+    global _jvm_started_pid
+
+    if _jvm_started_pid is not None and _jvm_started_pid != os.getpid():
+        raise InterfaceError(
+            "Cannot use jaydebeapiarrow in a forked process. "
+            "The JVM was started in the parent process (PID %d) but this is "
+            "PID %d. JPype does not support fork after JVM start. "
+            "Move the connect() call after the fork, or use a "
+            "post-fork-spawn worker model (e.g. gunicorn --preload with "
+            "lazy connections)." % (_jvm_started_pid, os.getpid())
+        )
+
     if not _is_jvm_started():
         class_path = []
         if jars:
@@ -177,6 +191,7 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
             jpype.startJVM(jvm_path, *args, ignoreUnrecognized=True,
                            convertStrings=True,
                            classpath=class_path)
+        _jvm_started_pid = os.getpid()
     
     if not jpype.java.lang.Thread.isAttached():
         jpype.attachThreadToJVM()

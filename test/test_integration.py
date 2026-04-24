@@ -2007,3 +2007,31 @@ conn.close()
             )
             self.assertTrue(result.stdout.strip().startswith('OK'),
                             f'Connection failed: {result.stdout}\n{result.stderr}')
+
+
+class ForkSafetyTest(unittest.TestCase):
+    """Tests for fork-safety guard (legacy issue #232)."""
+
+    def test_fork_after_connect_raises_interface_error(self):
+        """Simulating a fork by overwriting the PID tracker must raise
+        InterfaceError when attempting a new connection."""
+        import os
+        original_pid = jaydebeapiarrow._jvm_started_pid
+        try:
+            jaydebeapiarrow._jvm_started_pid = os.getpid() + 99999
+            with self.assertRaises(jaydebeapiarrow.InterfaceError) as ctx:
+                jaydebeapiarrow.connect('org.hsqldb.jdbcDriver',
+                                        'jdbc:hsqldb:mem:.', ['SA', ''])
+            self.assertIn("forked process", str(ctx.exception))
+        finally:
+            jaydebeapiarrow._jvm_started_pid = original_pid
+
+    def test_pid_recorded_after_connect(self):
+        """After connect(), _jvm_started_pid must equal the current PID."""
+        import os
+        c = jaydebeapiarrow.connect('org.hsqldb.jdbcDriver',
+                                    'jdbc:hsqldb:mem:.', ['SA', ''])
+        try:
+            self.assertEqual(jaydebeapiarrow._jvm_started_pid, os.getpid())
+        finally:
+            c.close()
