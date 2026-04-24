@@ -47,14 +47,19 @@ from jaydebeapiarrow.lib.arrow_utils import \
 def _is_jvm_started():
     """Check if the JPype JVM is started.
 
-    Compatible across JPype versions: uses ``jpype.isJVMStarted()`` when
-    available (JPype <1.7.1), and falls back to the internal state flag
-    for versions that removed the public API.
+    Defensive wrapper that prefers ``jpype.isJVMStarted()`` when available,
+    falling back to the internal ``_core._JVM_started`` flag if the public
+    attribute is missing (e.g. due to a broken/incomplete JPype install).
+
+    Note: ``jpype.isJVMStarted()`` has NOT been removed from any released
+    JPype version (confirmed present through v1.7.0).  The original upstream
+    report (baztian/jaydebeapi#253) was likely caused by a faulty
+    installation rather than an API removal.
     """
     import jpype
     if hasattr(jpype, 'isJVMStarted'):
         return jpype.isJVMStarted()
-    # Fallback for JPype versions that removed the public API
+    # Fallback for broken/incomplete JPype installs where the attribute is missing
     return bool(getattr(getattr(jpype, '_core', None), '_JVM_started', False))
 
 
