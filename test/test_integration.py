@@ -707,6 +707,7 @@ class HsqldbTest(IntegrationTestBase, unittest.TestCase):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert.sql'))
 
 
+
 class PostgresTest(IntegrationTestBase, unittest.TestCase):
 
     def connect(self):
