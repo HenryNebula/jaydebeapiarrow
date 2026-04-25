@@ -753,6 +753,14 @@ class MockTest(unittest.TestCase):
 
     # --- DBAPITypeObject mapping tests ---
 
+    def test_description_returns_column_label_not_name(self):
+        """cursor.description should return the column label (AS alias),
+        not the underlying column name from the table."""
+        self.conn.jconn.mockColumnAlias("real_column", "alias_col")
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT real_column AS alias_col FROM t")
+            self.assertEqual(cursor.description[0][0], "alias_col")
+
     def test_dbapi_type_other_maps_to_string(self):
         """JDBC OTHER should map to STRING type code."""
         import jpype
