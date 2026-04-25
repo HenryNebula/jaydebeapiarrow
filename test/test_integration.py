@@ -945,6 +945,8 @@ class HsqldbTest(IntegrationTestBase, unittest.TestCase):
         self.assertEqual(result[1][2], 'Checking Account')
 
 
+
+
 class PostgresTest(IntegrationTestBase, unittest.TestCase):
 
     def connect(self):
@@ -1115,6 +1117,23 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
                 self.assertIs(cursor.description[0][1], jaydebeapiarrow.STRING)
             finally:
                 cursor.execute("DROP TABLE test_uuid_type")
+
+    def test_xml_column_read(self):
+        """Verify XML columns are readable as strings via ExplicitTypeMapper.
+        Regression test for legacy issue baztian/jaydebeapi#223."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE test_xml_type (id INT, data XML)")
+            try:
+                cursor.execute(
+                    "INSERT INTO test_xml_type (id, data) "
+                    "VALUES (1, '<root><item>hello</item></root>')"
+                )
+                cursor.execute("SELECT data FROM test_xml_type WHERE id = 1")
+                result = cursor.fetchone()
+                self.assertIsInstance(result[0], str)
+                self.assertEqual(result[0], '<root><item>hello</item></root>')
+            finally:
+                cursor.execute("DROP TABLE test_xml_type")
 
     def test_array_column_read(self):
         """Verify ARRAY columns are readable as strings via ExplicitTypeMapper VARCHAR fallback."""

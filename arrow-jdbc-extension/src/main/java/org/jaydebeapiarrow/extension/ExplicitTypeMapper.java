@@ -169,7 +169,8 @@ public class ExplicitTypeMapper {
             String columnTypeName = resultSet.getMetaData().getColumnTypeName(columnIndex);
             if (columnType == Types.OTHER) {
                 String upperTypeName = columnTypeName.toUpperCase();
-                if (upperTypeName.contains("JSON") || upperTypeName.contains("UUID")) {
+                if (upperTypeName.contains("JSON") || upperTypeName.contains("UUID")
+                        || upperTypeName.contains("XML")) {
                     explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
                     logger.fine(String.format(
                             "Detected column %1s (%2s) as VARCHAR from type name '%3s' (JDBC type OTHER)",
@@ -177,6 +178,16 @@ public class ExplicitTypeMapper {
                             columnTypeName));
                 }
             }
+        }
+
+        /* Detect SQLXML columns - not natively supported by Arrow JDBC adapter.
+         * Map to VARCHAR so they are read as strings via getString(). */
+        List<Integer> xmlColumnIndices = parsedMetaData.getOrDefault(Types.SQLXML, new ArrayList<>());
+        for (int columnIndex : xmlColumnIndices) {
+            explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
+            logger.fine(String.format(
+                    "Column %1s (%2s) is SQLXML type, mapping to VARCHAR for string retrieval.",
+                    columnIndex, resultSet.getMetaData().getColumnName(columnIndex)));
         }
 
         /* Detect ARRAY columns - not natively supported by Arrow JDBC adapter.

@@ -1202,3 +1202,15 @@ class MockTest(unittest.TestCase):
             result = cursor.fetchone()
         self.assertEqual(result[0], 42)
         self.assertEqual(result[1], "Hello World")
+
+    # --- SQLXML type tests ---
+
+    def test_sqlxml_column_returns_string(self):
+        """SQLXML columns should return Python strings, not Java objects.
+        Regression test for legacy issue baztian/jaydebeapi#223."""
+        self.conn.jconn.mockType("SQLXML")
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            row = cursor.fetchone()
+            self.assertIsInstance(row[0], str)
+            self.assertEqual(row[0], "DummyString")

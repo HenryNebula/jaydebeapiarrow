@@ -304,6 +304,7 @@ public abstract class MockConnection implements Connection {
       case Types.CLOB:
       case Types.LONGVARCHAR:
       case Types.LONGNVARCHAR:
+      case Types.SQLXML:
         object = "DummyString";
         Mockito.when(mockResultSet.getString(1)).thenReturn((String) object);
         break;
