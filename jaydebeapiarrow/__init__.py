@@ -474,6 +474,7 @@ class Cursor(object):
         self._connection = connection
         self._buffer = []
         self._prep = None
+        self.lastrowid = None
 
     @property
     def connection(self):
@@ -615,6 +616,7 @@ class Cursor(object):
         if not parameters:
             parameters = ()
         self._close_last()
+        self.lastrowid = None
         self._prep = self._connection.jconn.prepareStatement(operation)
         self._set_stmt_parms(self._prep, parameters, is_batch=False)
         try:
@@ -631,6 +633,7 @@ class Cursor(object):
 
     def executemany(self, operation, seq_of_parameters):
         self._close_last()
+        self.lastrowid = None
         self._prep = self._connection.jconn.prepareStatement(operation)
         self._set_stmt_parms(self._prep, seq_of_parameters, is_batch=True)
         update_counts = self._prep.executeBatch()
