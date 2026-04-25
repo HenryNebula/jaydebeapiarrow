@@ -1,4 +1,5 @@
 import time
+import os
 import sys
 import psycopg2
 import argparse
