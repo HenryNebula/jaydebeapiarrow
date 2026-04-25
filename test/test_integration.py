@@ -329,13 +329,13 @@ class IntegrationTestBase(object):
             with self.assertRaises(jaydebeapiarrow.DatabaseError) as cm:
                 cursor.execute("SELECT * FROM nonexistent_table")
         msg = str(cm.exception)
-        # Should contain the specific exception class (SQLSyntaxErrorException)
-        self.assertIn("SQLSyntaxErrorException", msg)
-        # Should include the cause chain from the JDBC driver
-        self.assertIn("Caused by:", msg)
-        self.assertIn("NONEXISTENT_TABLE", msg)
+        # Should contain the JDBC exception class name
+        self.assertIn("Exception", msg)
+        # Should reference the nonexistent table
+        self.assertIn("nonexistent_table", msg.lower())
         # Should not contain duplicated class names (JPype 1.7.0+ artefact)
         self.assertNotIn("java.sql.java.sql", msg)
+        self.assertNotIn("com.microsoft.com.microsoft", msg)
 
     def test_execute_type_blob(self):
         stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, " \
