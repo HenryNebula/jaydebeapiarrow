@@ -873,6 +873,40 @@ class HsqldbTest(IntegrationTestBase, unittest.TestCase):
             self.assertEqual(cursor.description[0][0], "ACCT_NUM")
 
 
+    def test_timestamp_utc_roundtrip_no_timezone_shift(self):
+        """Verify TIMESTAMP values round-trip without timezone shifting.
+
+        Regression test for baztian/jaydebeapi#73. Legacy jaydebeapi returned
+        timestamps in the JVM's local timezone instead of UTC. This test
+        inserts specific timestamp values via parameter binding and verifies
+        they are returned as naive datetime objects with exact values — no
+        timezone offset applied.
+        """
+        test_cases = [
+            # (inserted_timestamp, description)
+            (self.dbapi.Timestamp(2024, 1, 15, 0, 0, 0),
+             "UTC midnight — legacy bug would shift to previous day in EST"),
+            (self.dbapi.Timestamp(2024, 6, 15, 14, 30, 0, 123456),
+             "midday with microseconds"),
+            (self.dbapi.Timestamp(2024, 12, 31, 23, 59, 59, 999999),
+             "end-of-day edge case — legacy bug could roll over to next day"),
+        ]
+        stmt = ("insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE) "
+                "values (?, ?, ?)")
+        with self.conn.cursor() as cursor:
+            for idx, (ts, _desc) in enumerate(test_cases):
+                cursor.execute(stmt, (ts, 100 + idx, Decimal('1.0')))
+            cursor.execute(
+                "select ACCOUNT_ID from ACCOUNT "
+                "where ACCOUNT_NO >= 100 order by ACCOUNT_NO")
+            results = cursor.fetchall()
+        for idx, (ts, desc) in enumerate(test_cases):
+            with self.subTest(desc=desc):
+                self.assertEqual(results[idx][0], ts)
+                self.assertIsNone(results[idx][0].tzinfo,
+                                  "TIMESTAMP must return naive datetime")
+
+
 class PostgresTest(IntegrationTestBase, unittest.TestCase):
 
     def connect(self):
