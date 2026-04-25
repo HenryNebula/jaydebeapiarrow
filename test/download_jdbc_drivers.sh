@@ -23,6 +23,24 @@ download() {
   fi
 }
 
+download_classifier() {
+  local group="$1"
+  local artifact="$2"
+  local version="$3"
+  local classifier="$4"
+  local jar="${artifact}-${version}-${classifier}.jar"
+  local dest="$DEST_DIR/$jar"
+
+  if [ -f "$dest" ]; then
+    echo "Already exists: $jar"
+  else
+    local url="https://repo1.maven.org/maven2/${group//.//}/${artifact}/${version}/${jar}"
+    echo "Downloading $jar..."
+    curl -o "$dest" -L "$url"
+    echo "Downloaded to $dest"
+  fi
+}
+
 echo "Downloading JDBC drivers to $DEST_DIR..."
 echo ""
 
@@ -31,7 +49,7 @@ if [ "${1}" = "--java8" ]; then
   download org.postgresql           postgresql          42.7.4
   download com.mysql                mysql-connector-j   8.0.33
   download org.xerial               sqlite-jdbc         3.45.1.0
-  download org.hsqldb               hsqldb              2.5.2
+  download_classifier org.hsqldb   hsqldb              2.7.4 jdk8
   download com.microsoft.sqlserver  mssql-jdbc          12.6.1.jre8
   # Oracle (ojdbc), DB2 (jcc), Trino, Drill skipped — no Java 8 variants needed
 else
