@@ -669,12 +669,12 @@ class MockTest(unittest.TestCase):
         with self.conn.cursor() as cursor:
             cursor.execute("dummy stmt", (42, "hello", dt, None))
         captured = self.conn.jconn.getCapturedSetObjectArgs()
-        self.assertEqual(len(captured), 4)
+        # None uses setNull() (not setObject), so only 3 captures
+        self.assertEqual(len(captured), 3)
         self.assertEqual(captured[0][1], 42)
         self.assertEqual(captured[1][1], "hello")
         self.assertIsInstance(captured[2][1], Timestamp)
         self.assertEqual(captured[2][1].getNanos(), 500000000)
-        self.assertIsNone(captured[3][1])
 
     def test_to_java_date(self):
         """date should convert to java.sql.Date."""

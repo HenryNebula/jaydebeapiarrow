@@ -640,9 +640,16 @@ class IntegrationTestBase(object):
             self.assertEqual(actual_date, datetime(2024, 6, 15))
         else:
             self.assertEqual(actual_date, datetime(2024, 6, 15).date())
-        # Time: compare to second precision
-        self.assertEqual(result[2].replace(microsecond=0),
-                         datetime(2024, 6, 15, 10, 30, 45).time())
+        # Time: some drivers (Oracle) return datetime(1970,1,1,HH,MM,SS)
+        # instead of a pure time object; accept both forms.
+        actual_time = result[2]
+        if isinstance(actual_time, datetime):
+            self.assertEqual(actual_time.hour, 10)
+            self.assertEqual(actual_time.minute, 30)
+            self.assertEqual(actual_time.second, 45)
+        else:
+            self.assertEqual(actual_time.replace(microsecond=0),
+                             datetime(2024, 6, 15, 10, 30, 45).time())
 
 class SqliteTestBase(IntegrationTestBase):
 
