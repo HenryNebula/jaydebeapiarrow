@@ -111,6 +111,24 @@ _handle_sql_exception = None
 
 old_jpype = False
 
+def _build_java_exception_message(exc):
+    """Build a clean, informative error message from a Java exception.
+
+    Extracts the exception class name, message, and walks the cause chain
+    so that wrapped exceptions (e.g. RuntimeException wrapping an IOException)
+    are visible to the user.  This avoids the duplicated class-name artefact
+    that JPype 1.7.0+ produces via ``str(exc)``.
+    """
+    parts = []
+    current = exc
+    while current is not None:
+        cls_name = current.getClass().getName()
+        msg = str(current.getMessage()) if current.getMessage() else ""
+        parts.append(f"{cls_name}: {msg}" if msg else cls_name)
+        current = current.getCause()
+    return "\n  Caused by: ".join(parts)
+
+
 def _handle_sql_exception_jpype():
     import jpype
     SQLException = jpype.java.sql.SQLException
@@ -125,8 +143,9 @@ def _handle_sql_exception_jpype():
         exc_type = DatabaseError
     else:
         exc_type = InterfaceError
-        
-    reraise(exc_type, exc_info[1], exc_info[2])
+
+    message = _build_java_exception_message(exc_info[1])
+    reraise(exc_type, message, exc_info[2])
 
 def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
     import jpype
@@ -621,7 +640,10 @@ class Cursor(object):
             parameters = ()
         self._close_last()
         self.lastrowid = None
-        self._prep = self._connection.jconn.prepareStatement(operation)
+        try:
+            self._prep = self._connection.jconn.prepareStatement(operation)
+        except:
+            _handle_sql_exception()
         self._set_stmt_parms(self._prep, parameters, is_batch=False)
         try:
             is_rs = self._prep.execute()
@@ -638,9 +660,15 @@ class Cursor(object):
     def executemany(self, operation, seq_of_parameters):
         self._close_last()
         self.lastrowid = None
-        self._prep = self._connection.jconn.prepareStatement(operation)
+        try:
+            self._prep = self._connection.jconn.prepareStatement(operation)
+        except:
+            _handle_sql_exception()
         self._set_stmt_parms(self._prep, seq_of_parameters, is_batch=True)
-        update_counts = self._prep.executeBatch()
+        try:
+            update_counts = self._prep.executeBatch()
+        except:
+            _handle_sql_exception()
         # self._prep.getWarnings() ???
         self.rowcount = sum(update_counts)
         self._close_last()
