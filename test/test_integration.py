@@ -612,6 +612,24 @@ class IntegrationTestBase(object):
             result = cursor.fetchone()
         self.assertIsNone(result[0])
 
+    def test_execute_param_datetime(self):
+        """Verify Python datetime objects round-trip correctly via parameter binding."""
+        stmt = ("insert into ACCOUNT "
+                "(ACCOUNT_ID, ACCOUNT_NO, BALANCE, OPENED_AT, OPENED_AT_TIME) "
+                "values (?, ?, ?, ?, ?)")
+        ts = datetime(2024, 6, 15, 10, 30, 45, 123456)
+        d = datetime(2024, 6, 15).date()
+        t = datetime(2024, 6, 15, 10, 30, 45).time()
+        with self.conn.cursor() as cursor:
+            cursor.execute(stmt, (ts, 40, Decimal('7.0'), d, t))
+            cursor.execute(
+                "select ACCOUNT_ID, OPENED_AT, OPENED_AT_TIME "
+                "from ACCOUNT where ACCOUNT_NO = 40")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], datetime(2024, 6, 15, 10, 30, 45, 123456))
+        self.assertEqual(result[1], datetime(2024, 6, 15).date())
+        self.assertEqual(result[2], datetime(2024, 6, 15, 10, 30, 45).time())
+
 class SqliteTestBase(IntegrationTestBase):
 
     def setUpSql(self):
