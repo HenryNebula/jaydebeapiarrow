@@ -25,8 +25,12 @@
 import jaydebeapiarrow
 
 import calendar
+import glob
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import threading
 
 import unittest
@@ -1894,3 +1898,51 @@ class PropertiesDriverArgsPassingTest(unittest.TestCase):
                                      {'user': 'SA', 'password': '' } )
         c = jaydebeapiarrow.connect(driver, url, driver_args)
         c.close()
+
+
+class JarPathSpacesIntegrationTest(unittest.TestCase):
+    """Integration test for JAR paths containing spaces (issue #86).
+
+    Uses HSQLDB driver copied to a path with spaces, run in a subprocess
+    to avoid JPype single-JVM-per-process limitation.
+    """
+
+    def test_hsqldb_jar_path_with_spaces(self):
+        """HSQLDB connection should work when JAR is in a path with spaces."""
+        # Find the HSQLDB JAR
+        hsqldb_jar = None
+        jar_dir = os.path.join(_THIS_DIR, 'jars')
+        if not os.path.isdir(jar_dir):
+            self.skipTest('test/jars/ directory not found (run download_jdbc_drivers.sh)')
+        for f in os.listdir(jar_dir):
+            if 'hsqldb' in f.lower() and f.endswith('.jar'):
+                hsqldb_jar = os.path.join(jar_dir, f)
+                break
+        self.assertIsNotNone(hsqldb_jar, 'HSQLDB JAR not found in test/jars/')
+
+        with tempfile.TemporaryDirectory(prefix='path with spaces ') as tmpdir:
+            dest = os.path.join(tmpdir, os.path.basename(hsqldb_jar))
+            shutil.copy2(hsqldb_jar, dest)
+
+            code = f'''
+import jaydebeapiarrow
+conn = jaydebeapiarrow.connect(
+    'org.hsqldb.jdbcDriver',
+    'jdbc:hsqldb:mem:.',
+    ['SA', ''],
+    jars={repr(dest)}
+)
+cursor = conn.cursor()
+cursor.execute('SELECT 1 AS col1 FROM (VALUES(0)) AS t')
+rows = cursor.fetchall()
+print(f'OK: {{rows}}')
+cursor.close()
+conn.close()
+'''
+            result = subprocess.run(
+                [sys.executable, '-c', code],
+                capture_output=True, text=True, timeout=30,
+                cwd=os.path.dirname(_THIS_DIR)
+            )
+            self.assertTrue(result.stdout.strip().startswith('OK'),
+                            f'Connection failed: {result.stdout}\n{result.stderr}')
