@@ -29,15 +29,15 @@ Tests performance with increasing column counts:
 
 ### 1. PostgreSQL Database
 
-You need a running PostgreSQL instance with the following configuration:
+You need a running PostgreSQL instance. Connection settings are configurable via environment variables:
 
 ```bash
-# Default connection settings in benchmark scripts
-Host: localhost
-Port: 5432
-Database: test_db
-User: user
-Password: password
+# Environment variables (with defaults)
+BENCH_DB_HOST=localhost
+BENCH_DB_PORT=15432
+BENCH_DB_NAME=test_db
+BENCH_DB_USER=user
+BENCH_DB_PASS=password
 ```
 
 To set up the database:
@@ -143,14 +143,21 @@ Dataset      | Method               | Time (s)   | Speedup
 
 ## Configuration
 
-You can modify benchmark settings in `compare_performance.py`:
+Connection settings can be overridden via environment variables:
+
+```bash
+export BENCH_DB_HOST=localhost
+export BENCH_DB_PORT=15432
+export BENCH_DB_NAME=test_db
+export BENCH_DB_USER=user
+export BENCH_DB_PASS=password
+```
+
+Other settings (driver path, iterations) can be modified in `compare_performance.py`:
 
 ```python
 JDBC_DRIVER_PATH = "test/jars/postgresql-42.7.2.jar"
 JDBC_CLASS = "org.postgresql.Driver"
-JDBC_URL = "jdbc:postgresql://localhost:5432/test_db"
-DB_USER = "user"
-DB_PASS = "password"
 QUERY = "SELECT * FROM benchmark_test"
 ITERATIONS = 3
 ```

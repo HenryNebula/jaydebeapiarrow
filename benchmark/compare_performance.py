@@ -17,9 +17,12 @@ from pathlib import Path
 # --- Configuration ---
 JDBC_DRIVER_PATH = os.path.abspath("test/jars/postgresql-42.7.2.jar")
 JDBC_CLASS = "org.postgresql.Driver"
-JDBC_URL = "jdbc:postgresql://localhost:5433/test_db"
-DB_USER = "user"
-DB_PASS = "password"
+DB_HOST = os.environ.get("BENCH_DB_HOST", "localhost")
+DB_PORT = os.environ.get("BENCH_DB_PORT", "15432")
+DB_NAME = os.environ.get("BENCH_DB_NAME", "test_db")
+DB_USER = os.environ.get("BENCH_DB_USER", "user")
+DB_PASS = os.environ.get("BENCH_DB_PASS", "password")
+JDBC_URL = f"jdbc:postgresql://{DB_HOST}:{DB_PORT}/{DB_NAME}"
 QUERY = "SELECT * FROM benchmark_test"
 ITERATIONS = 3 # Reduced iterations for larger datasets to save time
 

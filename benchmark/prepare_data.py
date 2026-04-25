@@ -4,11 +4,11 @@ import psycopg2
 import argparse
 
 # Configuration matching the benchmark script
-DB_HOST = "localhost"
-DB_PORT = "5433"
-DB_NAME = "test_db"
-DB_USER = "user"
-DB_PASS = "password"
+DB_HOST = os.environ.get("BENCH_DB_HOST", "localhost")
+DB_PORT = os.environ.get("BENCH_DB_PORT", "15432")
+DB_NAME = os.environ.get("BENCH_DB_NAME", "test_db")
+DB_USER = os.environ.get("BENCH_DB_USER", "user")
+DB_PASS = os.environ.get("BENCH_DB_PASS", "password")
 
 def main():
     parser = argparse.ArgumentParser()
