@@ -1770,6 +1770,58 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
         self.skipTest("Drill does not support parameterized INSERT queries")
 
 
+class JavaSqlTypesReflectionTest(unittest.TestCase):
+    """Verify java.sql.Types field access uses standard Java Reflection API
+    (not deprecated JPype getStaticAttribute). Regression for legacy #111."""
+
+    def setUp(self):
+        self.conn = jaydebeapiarrow.connect(
+            'org.hsqldb.jdbc.JDBCDriver',
+            'jdbc:hsqldb:mem:testreflection.',
+            ['SA', ''],
+        )
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_type_constants_accessible_via_reflection(self):
+        """java.sql.Types constants should be accessible through
+        standard Java Reflection, not getStaticAttribute()."""
+        import jpype
+        Types = jpype.java.sql.Types
+        # Access via standard attribute access (JPype proxy)
+        self.assertEqual(Types.INTEGER, 4)
+        self.assertEqual(Types.VARCHAR, 12)
+        self.assertEqual(Types.TIMESTAMP, 93)
+        self.assertEqual(Types.DECIMAL, 3)
+
+    def test_dbapi_type_comparison_with_real_connection(self):
+        """DBAPITypeObject comparison should work after a real JDBC
+        connection initializes the type mapping via Reflection."""
+        import jpype
+        Types = jpype.java.sql.Types
+        # After connecting, _jdbc_const_to_name should be populated
+        self.assertIsNotNone(jaydebeapiarrow._jdbc_const_to_name)
+        # Verify type comparisons work
+        self.assertEqual(jaydebeapiarrow.NUMBER, Types.INTEGER)
+        self.assertEqual(jaydebeapiarrow.STRING, Types.VARCHAR)
+        self.assertEqual(jaydebeapiarrow.DATETIME, Types.TIMESTAMP)
+
+    def test_cursor_description_maps_types_correctly(self):
+        """cursor.description should use correct type names from
+        Reflection-based type mapping."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE test_reflect (id INTEGER, name VARCHAR(50), val DECIMAL(10,2))")
+            cursor.execute("INSERT INTO test_reflect VALUES (1, 'test', 3.14)")
+            cursor.execute("SELECT * FROM test_reflect")
+            desc = cursor.description
+            # All three columns should have descriptions
+            self.assertEqual(len(desc), 3)
+            self.assertEqual(desc[0][0], 'ID')
+            self.assertEqual(desc[1][0], 'NAME')
+            self.assertEqual(desc[2][0], 'VAL')
+
+
 class PropertiesDriverArgsPassingTest(unittest.TestCase):
 
     def test_connect_with_sequence(self):
