@@ -44,6 +44,25 @@ from jaydebeapiarrow.lib.arrow_utils import \
     fetch_next_batch
 
 
+def _is_jvm_started():
+    """Check if the JPype JVM is started.
+
+    Defensive wrapper that prefers ``jpype.isJVMStarted()`` when available,
+    falling back to the internal ``_core._JVM_started`` flag if the public
+    attribute is missing (e.g. due to a broken/incomplete JPype install).
+
+    Note: ``jpype.isJVMStarted()`` has NOT been removed from any released
+    JPype version (confirmed present through v1.7.0).  The original upstream
+    report (baztian/jaydebeapi#253) was likely caused by a faulty
+    installation rather than an API removal.
+    """
+    import jpype
+    if hasattr(jpype, 'isJVMStarted'):
+        return jpype.isJVMStarted()
+    # Fallback for broken/incomplete JPype installs where the attribute is missing
+    return bool(getattr(getattr(jpype, '_core', None), '_JVM_started', False))
+
+
 def set_debug(enabled=True):
     """Enable or disable debug logging from the Java bridge (JUL FINE level).
 
@@ -58,8 +77,7 @@ def set_debug(enabled=True):
     Args:
         enabled: True to enable debug logging, False to disable.
     """
-    import jpype
-    if not jpype.isJVMStarted():
+    if not _is_jvm_started():
         return
     Level = jpype.JClass("java.util.logging.Level")
     target_level = Level.FINE if enabled else Level.INFO
@@ -112,7 +130,7 @@ def _handle_sql_exception_jpype():
 
 def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
     import jpype
-    if not jpype.isJVMStarted():
+    if not _is_jvm_started():
         args = []
         class_path = []
         if jars:
@@ -253,7 +271,7 @@ class DBAPITypeObject(object):
         global _jdbc_const_to_name
         if _jdbc_const_to_name is None:
             import jpype
-            if not jpype.isJVMStarted():
+            if not _is_jvm_started():
                 return None
             try:
                 Types = jpype.java.sql.Types

@@ -87,7 +87,8 @@ class IntegrationTestBase(object):
         """Suppress noisy Java loggers from Drill, Trino, etc."""
         try:
             import jpype
-            if not jpype.isJVMStarted():
+            from jaydebeapiarrow import _is_jvm_started
+            if not _is_jvm_started():
                 return
             Level = jpype.JClass("java.util.logging.Level")
             root = jpype.JClass("java.util.logging.Logger").getLogger("")
