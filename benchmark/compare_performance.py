@@ -17,9 +17,12 @@ from pathlib import Path
 # --- Configuration ---
 JDBC_DRIVER_PATH = os.path.abspath("test/jars/postgresql-42.7.2.jar")
 JDBC_CLASS = "org.postgresql.Driver"
-JDBC_URL = "jdbc:postgresql://localhost:5433/test_db"
-DB_USER = "user"
-DB_PASS = "password"
+DB_HOST = os.environ.get("BENCH_DB_HOST", "localhost")
+DB_PORT = os.environ.get("BENCH_DB_PORT", "15432")
+DB_NAME = os.environ.get("BENCH_DB_NAME", "test_db")
+DB_USER = os.environ.get("BENCH_DB_USER", "user")
+DB_PASS = os.environ.get("BENCH_DB_PASS", "password")
+JDBC_URL = f"jdbc:postgresql://{DB_HOST}:{DB_PORT}/{DB_NAME}"
 QUERY = "SELECT * FROM benchmark_test"
 ITERATIONS = 3 # Reduced iterations for larger datasets to save time
 
@@ -349,6 +352,7 @@ if __name__ == "__main__":
     parser.add_argument("--columns", type=int, default=None, help="Expected number of columns")
     parser.add_argument("--test-type", choices=["rows", "columns"], default="rows", help="Type of benchmark suite to run (coordinator)")
     parser.add_argument("--output", type=str, default=None, help="Output JSON file path (default: benchmark/results/<type>_benchmark_<timestamp>.json)")
+    parser.add_argument("--skip-original", action="store_true", help="Skip original jaydebeapi baseline (slow)")
     args = parser.parse_args()
 
     if args.mode:
@@ -408,15 +412,16 @@ if __name__ == "__main__":
                 res_p = run_subprocess("psycopg2", f"Baseline (Psycopg2) - {rows_count} rows", rows_count, fixed_cols)
                 results.append({"name": "Psycopg2", "time": res_p["time"]})
 
-                res_a = run_subprocess("original", f"Baseline (Original) - {rows_count} rows", rows_count, fixed_cols)
-                results.append({"name": "Original", "time": res_a["time"]})
+                if not args.skip_original:
+                    res_a = run_subprocess("original", f"Baseline (Original) - {rows_count} rows", rows_count, fixed_cols)
+                    results.append({"name": "Original", "time": res_a["time"]})
 
                 res_b = run_subprocess("arrow-tuple", f"Arrow (Drop-in) - {rows_count} rows", rows_count, fixed_cols)
                 results.append({"name": "Arrow (Drop-in)", "time": res_b["time"]})
-                
+
                 res_c = run_subprocess("arrow-native", f"Arrow (Native) - {rows_count} rows", rows_count, fixed_cols)
                 results.append({"name": "Arrow (Native)", "time": res_c["time"]})
-                
+
                 final_report[rows_count] = results
 
             # --- Final Summary (Rows) ---
@@ -462,15 +467,16 @@ if __name__ == "__main__":
                 res_p = run_subprocess("psycopg2", f"Baseline (Psycopg2) - {cols_count} cols", fixed_rows, cols_count)
                 results.append({"name": "Psycopg2", "time": res_p["time"]})
 
-                res_a = run_subprocess("original", f"Baseline (Original) - {cols_count} cols", fixed_rows, cols_count)
-                results.append({"name": "Original", "time": res_a["time"]})
+                if not args.skip_original:
+                    res_a = run_subprocess("original", f"Baseline (Original) - {cols_count} cols", fixed_rows, cols_count)
+                    results.append({"name": "Original", "time": res_a["time"]})
 
                 res_b = run_subprocess("arrow-tuple", f"Arrow (Drop-in) - {cols_count} cols", fixed_rows, cols_count)
                 results.append({"name": "Arrow (Drop-in)", "time": res_b["time"]})
-                
+
                 res_c = run_subprocess("arrow-native", f"Arrow (Native) - {cols_count} cols", fixed_rows, cols_count)
                 results.append({"name": "Arrow (Native)", "time": res_c["time"]})
-                
+
                 final_report[cols_count] = results
 
             # --- Final Summary (Columns) ---
