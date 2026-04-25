@@ -978,3 +978,41 @@ class MockTest(unittest.TestCase):
             cursor.execute(long_query)
             result = cursor.fetchone()
         self.assertEqual(result[0], 1)
+
+    # --- Memory leak regression tests (legacy #227) ---
+
+    def test_cursor_close_after_partial_fetch(self):
+        """Closing a cursor after a partial fetch should not leak the iterator."""
+        self.conn.jconn.mockType("INTEGER")
+        cursor = self.conn.cursor()
+        cursor.execute("dummy stmt")
+        cursor.fetchone()
+        cursor.close()
+        self.assertIsNone(cursor._iter)
+        self.assertEqual(cursor._buffer, [])
+        self.assertIsNone(cursor._connection)
+
+    def test_repeated_query_cycles_no_accumulation(self):
+        """Repeated execute/close cycles should not accumulate stale iterators
+        or buffers (legacy #227). The mock driver's ResultSet never exhausts,
+        so we test partial fetch + close cycles instead."""
+        self.conn.jconn.mockType("INTEGER")
+        for _ in range(10):
+            cursor = self.conn.cursor()
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+            self.assertIsNotNone(result)
+            cursor.close()
+            # After close, iterator and buffer should be cleaned up
+            self.assertIsNone(cursor._iter)
+            self.assertEqual(cursor._buffer, [])
+
+    def test_close_last_idempotent(self):
+        """Calling _close_last multiple times should not raise."""
+        self.conn.jconn.mockType("INTEGER")
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            cursor.fetchone()
+            cursor._close_last()
+            cursor._close_last()
+            self.assertIsNone(cursor._iter)

@@ -830,6 +830,41 @@ class HsqldbTest(IntegrationTestBase, unittest.TestCase):
         returned_ids = sorted(row[0] for row in result)
         self.assertEqual(returned_ids, [18, 19])
 
+    def test_iterator_closed_after_fetchall(self):
+        """After fetchall exhausts the result set, the Arrow iterator should
+        be closed and nulled out (memory leak regression, legacy #227)."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM Account")
+            cursor.fetchall()
+            self.assertIsNone(cursor._iter)
+
+    def test_iterator_closed_after_fetchone_exhaustion(self):
+        """After fetchone exhausts the result set, iterator should be closed."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM Account")
+            cursor.fetchone()
+            result = cursor.fetchone()
+            self.assertIsNone(result)
+            self.assertIsNone(cursor._iter)
+
+    def test_iterator_closed_after_fetchmany_exhaustion(self):
+        """After fetchmany exhausts the result set, iterator should be closed."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM Account")
+            cursor.fetchmany(size=1000)
+            self.assertIsNone(cursor._iter)
+
+    def test_repeated_query_cycles_release_resources(self):
+        """Repeated execute/fetchall cycles should not accumulate iterators
+        or buffers (memory leak regression, legacy #227)."""
+        with self.conn.cursor() as cursor:
+            for _ in range(5):
+                cursor.execute("SELECT * FROM Account")
+                result = cursor.fetchall()
+                self.assertTrue(len(result) > 0)
+                self.assertIsNone(cursor._iter)
+                self.assertEqual(cursor._buffer, [])
+
 
 class PostgresTest(IntegrationTestBase, unittest.TestCase):
 

@@ -44,6 +44,7 @@ Homepage = "https://github.com/HenryNebula/jaydebeapiarrow"
 [dependency-groups]
 dev = [
     "coverage>=4.5",
+    "jaydebeapi>=1.2.3",
     "unittest-xml-reporting",
 ]
 
