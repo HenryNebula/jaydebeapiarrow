@@ -999,6 +999,31 @@ class HsqldbTest(IntegrationTestBase, unittest.TestCase):
         self.conn.jconn.setAutoCommit(False)
         self.conn.rollback()
 
+    def test_java_exception_during_fetch_raises_database_error(self):
+        """JDBC exceptions during fetch should raise DatabaseError, not raw Java exception.
+
+        Regression test for legacy issue baztian/jaydebeapi#58. Tests that
+        SQL exceptions raised during data retrieval (e.g., division by zero
+        in calculated columns) are properly converted to Python DatabaseError.
+        Also verifies that valid arithmetic expressions still work correctly."""
+        _, conn = self.connect()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("CREATE TABLE test_divzero (a INTEGER, b INTEGER)")
+            cursor.execute("INSERT INTO test_divzero VALUES (10, 2)")
+            cursor.execute("INSERT INTO test_divzero VALUES (5, 0)")
+            # Normal division works fine
+            cursor.execute("SELECT a / b FROM test_divzero WHERE b <> 0")
+            result = cursor.fetchone()
+            self.assertEqual(result[0], 5)
+            # Integer division by zero raises DatabaseError
+            with self.assertRaises(jaydebeapiarrow.DatabaseError):
+                cursor.execute("SELECT a / b FROM test_divzero WHERE b = 0")
+                cursor.fetchone()
+            cursor.execute("DROP TABLE test_divzero IF EXISTS")
+        finally:
+            conn.close()
+
 
 class PostgresTest(IntegrationTestBase, unittest.TestCase):
 
