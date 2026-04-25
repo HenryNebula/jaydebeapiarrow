@@ -444,4 +444,53 @@ public abstract class MockConnection implements Connection {
   public final ResultSet verifyResultSet() {
     return Mockito.verify(mockResultSet);
   }
+
+  /** Set up a multi-column mock result for testing mixed-type queries.
+   *  @param sqlTypes  JDBC type codes for each column
+   *  @param values    Java objects to return for each column (via getObject)
+   */
+  public final void mockMultiColumnResult(int[] sqlTypes, Object[] values) throws SQLException {
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(multi-column)");
+    Mockito.when(mockPreparedStatement.getResultSet()).thenReturn(mockResultSet);
+    Mockito.when(mockResultSet.next()).thenReturn(true);
+
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    int colCount = sqlTypes.length;
+    Mockito.when(mockMetaData.getColumnCount()).thenReturn(colCount);
+    for (int i = 0; i < colCount; i++) {
+      int col = i + 1; // JDBC is 1-based
+      Mockito.when(mockMetaData.getColumnType(col)).thenReturn(sqlTypes[i]);
+      Mockito.when(mockMetaData.getColumnTypeName(col)).thenReturn(JDBCType.valueOf(sqlTypes[i]).getName());
+      Mockito.when(mockMetaData.getColumnName(col)).thenReturn("col_" + col);
+      Mockito.when(mockMetaData.getColumnLabel(col)).thenReturn("col_" + col);
+      Mockito.when(mockMetaData.isNullable(col)).thenReturn(mockMetaData.columnNullableUnknown);
+      Mockito.when(mockMetaData.getPrecision(col)).thenReturn(0);
+      Mockito.when(mockMetaData.getScale(col)).thenReturn(0);
+    }
+    Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
+
+    for (int i = 0; i < colCount; i++) {
+      int col = i + 1;
+      Object value = values[i];
+      Mockito.when(mockResultSet.getObject(col)).thenReturn(value);
+      // Mock type-specific getters that the Arrow JDBC consumer calls.
+      // Use Number to handle both Integer and Long (JPype passes Python int as Long).
+      if (value instanceof String) {
+        Mockito.when(mockResultSet.getString(col)).thenReturn((String) value);
+      } else if (value instanceof Number) {
+        Number num = (Number) value;
+        Mockito.when(mockResultSet.getInt(col)).thenReturn(num.intValue());
+        Mockito.when(mockResultSet.getLong(col)).thenReturn(num.longValue());
+        Mockito.when(mockResultSet.getDouble(col)).thenReturn(num.doubleValue());
+      } else if (value instanceof BigDecimal) {
+        Mockito.when(mockResultSet.getBigDecimal(col)).thenReturn((BigDecimal) value);
+      } else if (value instanceof Boolean) {
+        Mockito.when(mockResultSet.getBoolean(col)).thenReturn((Boolean) value);
+      }
+    }
+
+    Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
 }

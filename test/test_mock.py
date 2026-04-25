@@ -1165,3 +1165,40 @@ class MockTest(unittest.TestCase):
         self.assertTrue(jaydebeapiarrow.DATETIME == int(Types.TIMESTAMP))
         # DATE has its own type object
         self.assertTrue(jaydebeapiarrow.DATE == int(Types.DATE))
+
+    def test_varchar_returns_data_not_empty(self):
+        """Verify VARCHAR columns return actual data, not empty strings.
+
+        Regression test for legacy issue #119 where Oracle 9i VARCHAR2 columns
+        returned empty strings. In the original jaydebeapi, getObject() could
+        return oracle.sql.CHAR objects that JPype failed to convert. In
+        jaydebeapiarrow, the Arrow JDBC adapter uses getString() which always
+        returns a proper java.lang.String.
+        """
+        self.conn.jconn.mockType("VARCHAR")
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertIsInstance(result[0], str)
+        self.assertEqual(result[0], "DummyString")
+        self.assertNotEqual(result[0], "")
+
+    def test_varchar_with_multicolumn_result(self):
+        """Verify VARCHAR data is returned correctly alongside numeric columns.
+
+        Regression test for legacy issue #119: the reporter's query had mixed
+        VARCHAR and numeric columns, and only numeric data was returned.
+        """
+        import jpype
+        Types = jpype.java.sql.Types
+
+        # Set up a 2-column result: INTEGER + VARCHAR
+        self.conn.jconn.mockMultiColumnResult(
+            [Types.INTEGER, Types.VARCHAR],
+            [42, "Hello World"]
+        )
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], 42)
+        self.assertEqual(result[1], "Hello World")

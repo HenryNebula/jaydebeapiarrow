@@ -906,6 +906,44 @@ class HsqldbTest(IntegrationTestBase, unittest.TestCase):
                 self.assertIsNone(results[idx][0].tzinfo,
                                   "TIMESTAMP must return naive datetime")
 
+    def test_varchar_columns_return_data(self):
+        """Verify VARCHAR columns return actual data, not empty strings.
+
+        Regression test for legacy issue #119 where Oracle 9i VARCHAR2 columns
+        returned empty strings while numeric fields worked fine. The original
+        jaydebeapi used getObject() which could return driver-specific types
+        (e.g., oracle.sql.CHAR) that JPype couldn't convert. jaydebeapiarrow's
+        Arrow JDBC adapter uses getString() for VARCHAR columns, which always
+        returns a proper java.lang.String.
+        """
+        with self.conn.cursor() as cursor:
+            # Insert rows with VARCHAR data
+            cursor.execute(
+                "INSERT INTO ACCOUNT "
+                "(ACCOUNT_ID, ACCOUNT_NO, BALANCE, PRODUCT_NAME) "
+                "VALUES ('2010-01-01 00:00:00.000000', 100, 99.99, 'Savings Account')"
+            )
+            cursor.execute(
+                "INSERT INTO ACCOUNT "
+                "(ACCOUNT_ID, ACCOUNT_NO, BALANCE, PRODUCT_NAME) "
+                "VALUES ('2010-01-02 00:00:00.000000', 101, 0.00, 'Checking Account')"
+            )
+            # Query with mixed VARCHAR and numeric columns
+            cursor.execute(
+                "SELECT ACCOUNT_NO, BALANCE, PRODUCT_NAME "
+                "FROM ACCOUNT WHERE ACCOUNT_NO >= 100 ORDER BY ACCOUNT_NO"
+            )
+            result = cursor.fetchall()
+        self.assertEqual(len(result), 2)
+        # Verify numeric data is present
+        self.assertEqual(result[0][0], 100)
+        self.assertEqual(result[0][1], Decimal('99.99'))
+        # Verify VARCHAR data is NOT empty
+        self.assertIsInstance(result[0][2], str)
+        self.assertEqual(result[0][2], 'Savings Account')
+        self.assertNotEqual(result[0][2], '')
+        self.assertEqual(result[1][2], 'Checking Account')
+
 
 class PostgresTest(IntegrationTestBase, unittest.TestCase):
 
