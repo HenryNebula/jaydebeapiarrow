@@ -10,6 +10,7 @@ Usage:
 
     # Run a single implementation (worker mode):
     CLASSPATH="test/jars/*" uv run python benchmark/memory_benchmark.py --mode arrow
+    CLASSPATH="test/jars/*" uv run python benchmark/memory_benchmark.py --mode pypi
     CLASSPATH="test/jars/*" uv run python benchmark/memory_benchmark.py --mode original
 """
 
@@ -26,13 +27,10 @@ import tracemalloc
 # --- Configuration ---
 NUM_ROUNDS = 10
 ROW_COUNT = 100_000
-HSQLDB_JAR = os.path.abspath("test/jars/hsqldb-2.7.4.jar")
 JDBC_URL = "jdbc:hsqldb:mem:mem_bench"
 JDBC_DRIVER = "org.hsqldb.jdbcDriver"
 JDBC_USER = "SA"
 JDBC_PASS = ""
-
-
 def log(msg):
     print(msg, flush=True)
 
@@ -80,77 +78,26 @@ def setup_hsqldb(conn):
     log(f"  Inserted {ROW_COUNT} rows.")
 
 
-def run_benchmark_original():
-    """Benchmark original jaydebeapi memory consumption."""
-    import jaydebeapi
+def _connect(mode):
+    """Import the right module and return a connection."""
+    if mode == "original":
+        import jaydebeapi
+        return jaydebeapi.connect(JDBC_DRIVER, JDBC_URL, [JDBC_USER, JDBC_PASS])
+    else:
+        import jaydebeapiarrow
+        ver = getattr(jaydebeapiarrow, "__version__", "unknown")
+        log(f"  jaydebeapiarrow version: {ver}")
+        return jaydebeapiarrow.connect(JDBC_DRIVER, JDBC_URL, [JDBC_USER, JDBC_PASS], jars=[])
 
+
+def run_benchmark(mode):
+    """Benchmark memory consumption for the given mode (original, arrow, or pypi)."""
     tracemalloc.start()
     gc.collect()
 
     rss_before = get_rss_mb()
 
-    conn = jaydebeapi.connect(
-        JDBC_DRIVER, JDBC_URL, [JDBC_USER, JDBC_PASS], HSQLDB_JAR
-    )
-    setup_hsqldb(conn)
-
-    gc.collect()
-    rss_after_setup = get_rss_mb()
-    tm_after_setup, _ = get_tracemalloc_stats()
-
-    log(f"  Memory after setup: RSS={rss_after_setup:.1f}MB, heap={tm_after_setup:.1f}MB")
-
-    results = []
-    for round_num in range(1, NUM_ROUNDS + 1):
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM bench_test")
-        rows = cursor.fetchall()
-        cursor.close()
-        del rows
-        gc.collect()
-
-        rss = get_rss_mb()
-        tm_current, tm_peak = get_tracemalloc_stats()
-        results.append({
-            "round": round_num,
-            "rss_mb": round(rss, 1),
-            "heap_mb": round(tm_current, 1),
-            "peak_mb": round(tm_peak, 1),
-        })
-        log(f"  Round {round_num:2d}: RSS={rss:.1f}MB, heap={tm_current:.1f}MB, peak={tm_peak:.1f}MB")
-
-    conn.close()
-    tracemalloc.stop()
-
-    rss_final = get_rss_mb()
-    rss_growth = rss_final - rss_before
-    heap_first = results[0]["heap_mb"]
-    heap_last = results[-1]["heap_mb"]
-    heap_growth = heap_last - heap_first
-
-    log(f"\n  RSS growth (start->end): {rss_growth:.1f}MB")
-    log(f"  Heap growth (round1->round{NUM_ROUNDS}): {heap_growth:.1f}MB")
-
-    return {
-        "rss_before_mb": round(rss_before, 1),
-        "rss_after_setup_mb": round(rss_after_setup, 1),
-        "heap_growth_mb": round(heap_growth, 1),
-        "rounds": results,
-    }
-
-
-def run_benchmark_arrow():
-    """Benchmark jaydebeapiarrow memory consumption."""
-    import jaydebeapiarrow
-
-    tracemalloc.start()
-    gc.collect()
-
-    rss_before = get_rss_mb()
-
-    conn = jaydebeapiarrow.connect(
-        JDBC_DRIVER, JDBC_URL, [JDBC_USER, JDBC_PASS], jars=[HSQLDB_JAR]
-    )
+    conn = _connect(mode)
     setup_hsqldb(conn)
 
     gc.collect()
@@ -200,13 +147,7 @@ def run_benchmark_arrow():
 
 def run_worker(mode):
     """Run a single benchmark worker and output JSON result."""
-    if mode == "original":
-        result = run_benchmark_original()
-    elif mode == "arrow":
-        result = run_benchmark_arrow()
-    else:
-        print(f"Unknown mode: {mode}", file=sys.stderr)
-        sys.exit(1)
+    result = run_benchmark(mode)
     print("BENCHMARK_RESULT:" + json.dumps(result), flush=True)
 
 
@@ -216,7 +157,7 @@ def main():
     parser = argparse.ArgumentParser(description="Memory consumption benchmark")
     parser.add_argument(
         "--mode",
-        choices=["original", "arrow"],
+        choices=["original", "arrow", "pypi"],
         help="Worker mode: run a single implementation",
     )
     parser.add_argument(
@@ -241,13 +182,38 @@ def main():
 
         results = {}
 
-        for mode, label in [("original", "jaydebeapi (original)"), ("arrow", "jaydebeapiarrow (dev)")]:
+        benchmarks = [
+            ("original", "jaydebeapi (original)"),
+            ("pypi", "jaydebeapiarrow (PyPI latest)"),
+            ("arrow", "jaydebeapiarrow (dev)"),
+        ]
+
+        for mode, label in benchmarks:
             print(f"\n--- {label} ---", flush=True)
+
+            if mode == "pypi":
+                # Run in an isolated venv with only the PyPI package — avoids
+                # interfering with the local dev build.
+                env = os.environ.copy()
+                cmd = [
+                    "uv", "run",
+                    "--isolated", "--no-project",
+                    "--with", "jaydebeapiarrow",
+                    "python", __file__,
+                    "--mode", "pypi",
+                    "--rows", str(ROW_COUNT),
+                    "--rounds", str(NUM_ROUNDS),
+                ]
+            else:
+                env = None
+                cmd = [sys.executable, __file__, "--mode", mode, "--rows", str(ROW_COUNT), "--rounds", str(NUM_ROUNDS)]
+
             proc = subprocess.Popen(
-                [sys.executable, __file__, "--mode", mode, "--rows", str(ROW_COUNT), "--rounds", str(NUM_ROUNDS)],
+                cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                env=env,
             )
             stdout, stderr = proc.communicate()
 
