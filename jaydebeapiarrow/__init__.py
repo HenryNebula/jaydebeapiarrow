@@ -32,6 +32,7 @@ import datetime
 from decimal import Decimal
 import glob
 import os
+import threading
 import time
 import sys
 import warnings
@@ -111,6 +112,11 @@ _handle_sql_exception = None
 
 old_jpype = False
 
+# Lock to prevent race condition when multiple threads call connect()
+# simultaneously — without this, two threads can both see isJVMStarted()
+# return False and both attempt to start the JVM, causing a crash.
+_jvm_startup_lock = threading.Lock()
+
 def _handle_sql_exception_jpype():
     import jpype
     SQLException = jpype.java.sql.SQLException
@@ -130,53 +136,54 @@ def _handle_sql_exception_jpype():
 
 def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
     import jpype
-    if not _is_jvm_started():
-        class_path = []
-        if jars:
-            class_path.extend(jars)
-        class_path.extend(_get_classpath())
-        class_path.extend(_get_arrow_jar_paths())
-        class_path = list(set(class_path))
+    with _jvm_startup_lock:
+        if not _is_jvm_started():
+            class_path = []
+            if jars:
+                class_path.extend(jars)
+            class_path.extend(_get_classpath())
+            class_path.extend(_get_arrow_jar_paths())
+            class_path = list(set(class_path))
 
-        args = []
+            args = []
 
-        if libs:
-            # path to shared libraries
-            libs_path = os.path.pathsep.join(libs)
-            args.append('-Djava.library.path=%s' % libs_path)
+            if libs:
+                # path to shared libraries
+                libs_path = os.path.pathsep.join(libs)
+                args.append('-Djava.library.path=%s' % libs_path)
 
-        # Known issue: some JDBC drivers (notably IBM Db2) use the JVM's
-        # default charset for string conversion.  When the default is not
-        # UTF-8, non-ASCII characters (German umlauts, CJK, emoji) cause
-        # CharConversionException during result-set traversal.  Users who
-        # encounter this should pass jvm_args=['-Dfile.encoding=UTF-8']
-        # when calling connect().
-        # TODO: document this encoding requirement in user-facing docs
-        # and consider exposing a dedicated encoding parameter in connect().
+            # Known issue: some JDBC drivers (notably IBM Db2) use the JVM's
+            # default charset for string conversion.  When the default is not
+            # UTF-8, non-ASCII characters (German umlauts, CJK, emoji) cause
+            # CharConversionException during result-set traversal.  Users who
+            # encounter this should pass jvm_args=['-Dfile.encoding=UTF-8']
+            # when calling connect().
+            # TODO: document this encoding requirement in user-facing docs
+            # and consider exposing a dedicated encoding parameter in connect().
 
-        # Add-opens for Apache Arrow on Java 9+
-        args.append('--add-opens=java.base/java.nio=ALL-UNNAMED')
+            # Add-opens for Apache Arrow on Java 9+
+            args.append('--add-opens=java.base/java.nio=ALL-UNNAMED')
 
-        # jvm_path = ('/usr/lib/jvm/java-6-openjdk'
-        #             '/jre/lib/i386/client/libjvm.so')
-        jvm_path = jpype.getDefaultJVMPath()
-        global old_jpype
-        if hasattr(jpype, '__version__'):
-            try:
-                ver_match = re.match(r'\d+\.\d+', jpype.__version__)
-                if ver_match:
-                    jpype_ver = float(ver_match.group(0))
-                    if jpype_ver < 0.7:
-                        old_jpype = True
-            except ValueError:
-                pass
-        if old_jpype:
-            jpype.startJVM(jvm_path, *args,
-                           classpath=class_path)
-        else:
-            jpype.startJVM(jvm_path, *args, ignoreUnrecognized=True,
-                           convertStrings=True,
-                           classpath=class_path)
+            # jvm_path = ('/usr/lib/jvm/java-6-openjdk'
+            #             '/jre/lib/i386/client/libjvm.so')
+            jvm_path = jpype.getDefaultJVMPath()
+            global old_jpype
+            if hasattr(jpype, '__version__'):
+                try:
+                    ver_match = re.match(r'\d+\.\d+', jpype.__version__)
+                    if ver_match:
+                        jpype_ver = float(ver_match.group(0))
+                        if jpype_ver < 0.7:
+                            old_jpype = True
+                except ValueError:
+                    pass
+            if old_jpype:
+                jpype.startJVM(jvm_path, *args,
+                               classpath=class_path)
+            else:
+                jpype.startJVM(jvm_path, *args, ignoreUnrecognized=True,
+                               convertStrings=True,
+                               classpath=class_path)
     
     if not jpype.java.lang.Thread.isAttached():
         jpype.attachThreadToJVM()

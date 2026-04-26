@@ -32,6 +32,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from functools import partial
 
 import unittest
 
@@ -2007,3 +2008,35 @@ conn.close()
             )
             self.assertTrue(result.stdout.strip().startswith('OK'),
                             f'Connection failed: {result.stdout}\n{result.stderr}')
+
+
+class ParallelConnectTest(unittest.TestCase):
+    """Test that parallel connect() calls are thread-safe (issue #60)."""
+
+    def test_parallel_connects_with_hsqldb(self):
+        """Multiple threads connecting simultaneously should not crash."""
+        errors = []
+
+        def connect_and_query(idx):
+            try:
+                conn = jaydebeapiarrow.connect(
+                    'org.hsqldb.jdbcDriver',
+                    'jdbc:hsqldb:mem:parallel%d' % idx,
+                    ['SA', ''])
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1 FROM (VALUES(0))")
+                rows = cursor.fetchall()
+                conn.close()
+            except Exception as e:
+                errors.append(e)
+
+        threads = []
+        for i in range(5):
+            t = threading.Thread(target=partial(connect_and_query, i))
+            threads.append(t)
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(errors, [], f"Thread errors: {errors}")
