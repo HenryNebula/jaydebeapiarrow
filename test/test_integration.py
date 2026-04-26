@@ -1819,6 +1819,10 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
         """Drill has no INSERT INTO ... VALUES — skip param none test."""
         self.skipTest("Drill does not support INSERT INTO ... VALUES")
 
+    def test_execute_param_datetime(self):
+        """Drill has no parameterized INSERT — skip datetime param test."""
+        self.skipTest("Drill does not support parameterized INSERT queries")
+
     def test_execute_different_rowcounts(self):
         """Drill has no INSERT INTO ... VALUES — skip rowcount test."""
         self.skipTest("Drill does not support INSERT INTO ... VALUES")
