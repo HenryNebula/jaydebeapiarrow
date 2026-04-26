@@ -2007,3 +2007,31 @@ conn.close()
             )
             self.assertTrue(result.stdout.strip().startswith('OK'),
                             f'Connection failed: {result.stdout}\n{result.stderr}')
+
+
+class JvmArgsTest(unittest.TestCase):
+    """Test that jvm_args parameter passes custom JVM arguments on first connect."""
+
+    _TEST_PROP = 'jaydebeapiarrow.test.jvmargs'
+
+    def setUp(self):
+        import jpype
+        if jpype.isJVMStarted():
+            self.skipTest("JVM already started; jvm_args only takes effect on first connect")
+
+    def test_jvm_args_sets_system_property(self):
+        """jvm_args should set JVM system properties during startup."""
+        import jpype
+        import glob
+        mock_jars = glob.glob(os.path.join(_THIS_DIR, 'mock-jars', 'mockdriver*.jar'))
+        c = jaydebeapiarrow.connect(
+            'org.jaydebeapi.mockdriver.MockDriver',
+            'jdbc:jaydebeapi://dummyurl',
+            jars=mock_jars,
+            jvm_args=[f'-D{self._TEST_PROP}=hello_from_jvm_args']
+        )
+        try:
+            prop_value = jpype.java.lang.System.getProperty(self._TEST_PROP)
+            self.assertEqual(prop_value, 'hello_from_jvm_args')
+        finally:
+            c.close()

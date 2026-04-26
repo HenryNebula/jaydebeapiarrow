@@ -128,9 +128,12 @@ def _handle_sql_exception_jpype():
         
     reraise(exc_type, exc_info[1], exc_info[2])
 
-def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
+def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs, jvm_args=None):
     import jpype
     if not _is_jvm_started():
+        args = []
+        if jvm_args:
+            args.extend(jvm_args)
         class_path = []
         if jars:
             class_path.extend(jars)
@@ -379,7 +382,7 @@ def TimestampFromTicks(ticks):
     return Timestamp(*time.localtime(ticks)[:6])
 
 # DB-API 2.0 Module Interface connect constructor
-def connect(jclassname, url, driver_args=None, jars=None, libs=None):
+def connect(jclassname, url, driver_args=None, jars=None, libs=None, jvm_args=None):
     """Open a connection to a database using a JDBC driver and return
     a Connection instance.
 
@@ -395,6 +398,11 @@ def connect(jclassname, url, driver_args=None, jars=None, libs=None):
     jars: Jar filename or sequence of filenames for the JDBC driver
     libs: Dll/so filenames or sequence of dlls/sos used as shared
           library by the JDBC driver
+    jvm_args: Sequence of additional JVM arguments (e.g.
+           ['-Duser.timezone=America/Toronto',
+            '-Dfile.encoding=UTF-8']). Only used on the first
+           connect() call when the JVM is started. Ignored on
+           subsequent calls since the JVM cannot be restarted.
     """
     if isinstance(driver_args, str):
         driver_args = [ driver_args ]
@@ -410,7 +418,7 @@ def connect(jclassname, url, driver_args=None, jars=None, libs=None):
             libs = [ libs ]
     else:
         libs = []
-    jconn = _jdbc_connect(jclassname, url, driver_args, jars, libs)
+    jconn = _jdbc_connect(jclassname, url, driver_args, jars, libs, jvm_args)
     return Connection(jconn, jclassname)
 
 # DB-API 2.0 Connection Object
