@@ -131,23 +131,20 @@ def _handle_sql_exception_jpype():
 def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
     import jpype
     if not _is_jvm_started():
-        args = []
         class_path = []
         if jars:
             class_path.extend(jars)
-        # print(_get_classpath())
         class_path.extend(_get_classpath())
         class_path.extend(_get_arrow_jar_paths())
         class_path = list(set(class_path))
-        # print(class_path)
-        if class_path:
-            args.append('-Djava.class.path=%s' %
-                        os.path.pathsep.join(class_path))
+
+        args = []
+
         if libs:
             # path to shared libraries
             libs_path = os.path.pathsep.join(libs)
             args.append('-Djava.library.path=%s' % libs_path)
-        
+
         # Known issue: some JDBC drivers (notably IBM Db2) use the JVM's
         # default charset for string conversion.  When the default is not
         # UTF-8, non-ASCII characters (German umlauts, CJK, emoji) cause
@@ -174,10 +171,12 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
             except ValueError:
                 pass
         if old_jpype:
-            jpype.startJVM(jvm_path, *args)
+            jpype.startJVM(jvm_path, *args,
+                           classpath=class_path)
         else:
             jpype.startJVM(jvm_path, *args, ignoreUnrecognized=True,
-                           convertStrings=True)
+                           convertStrings=True,
+                           classpath=class_path)
     
     if not jpype.java.lang.Thread.isAttached():
         jpype.attachThreadToJVM()

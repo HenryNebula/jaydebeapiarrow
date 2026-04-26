@@ -20,6 +20,11 @@
 import jaydebeapiarrow
 from datetime import datetime, timedelta
 from decimal import Decimal
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 
 try:
     import unittest2 as unittest
@@ -1214,3 +1219,58 @@ class MockTest(unittest.TestCase):
             row = cursor.fetchone()
             self.assertIsInstance(row[0], str)
             self.assertEqual(row[0], "DummyString")
+
+
+class JarPathSpacesTest(unittest.TestCase):
+    """Tests for JAR file paths containing spaces (issue #86).
+
+    These tests must run in a subprocess because JPype only allows
+    one JVM start per process, and the main test suite already starts it.
+    """
+
+    def _find_mock_jar(self):
+        for root, dirs, files in os.walk(os.path.dirname(__file__)):
+            for f in files:
+                if f.startswith('mockdriver') and f.endswith('.jar'):
+                    return os.path.join(root, f)
+        self.fail('mockdriver JAR not found')
+
+    def _run_connect_in_subprocess(self, jar_path):
+        """Run a connect call in a fresh subprocess and return success/failure."""
+        code = f'''
+import jaydebeapiarrow
+try:
+    conn = jaydebeapiarrow.connect(
+        'org.jaydebeapi.mockdriver.MockDriver',
+        'jdbc:jaydebeapi://dummyurl',
+        jars={repr(jar_path)}
+    )
+    print('OK')
+    conn.close()
+except Exception as e:
+    print(f'FAIL: {{type(e).__name__}}: {{e}}')
+'''
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True, text=True, timeout=30,
+            cwd=os.path.dirname(os.path.dirname(__file__))
+        )
+        return result.stdout.strip(), result.stderr.strip()
+
+    def test_jar_path_with_spaces(self):
+        """JAR paths containing spaces should work (issue #86)."""
+        mock_jar = self._find_mock_jar()
+        with tempfile.TemporaryDirectory(prefix='path with spaces ') as tmpdir:
+            dest = os.path.join(tmpdir, os.path.basename(mock_jar))
+            shutil.copy2(mock_jar, dest)
+            stdout, stderr = self._run_connect_in_subprocess(dest)
+        self.assertEqual(stdout, 'OK', f'Connection failed: {stderr}')
+
+    def test_jar_path_with_special_chars(self):
+        """JAR paths containing parentheses and special chars should work."""
+        mock_jar = self._find_mock_jar()
+        with tempfile.TemporaryDirectory(prefix='path (x86) & test ') as tmpdir:
+            dest = os.path.join(tmpdir, os.path.basename(mock_jar))
+            shutil.copy2(mock_jar, dest)
+            stdout, stderr = self._run_connect_in_subprocess(dest)
+        self.assertEqual(stdout, 'OK', f'Connection failed: {stderr}')
