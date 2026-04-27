@@ -30,3 +30,5 @@ jars/
 */lib/*.jar
 benchmark/results/
 benchmark/profiles/
+uv.lock
+test/mock-jars/

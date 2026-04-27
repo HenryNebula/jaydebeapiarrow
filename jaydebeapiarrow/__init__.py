@@ -442,12 +442,16 @@ class Connection(object):
         self._closed = True
 
     def commit(self):
+        if self.jconn.getAutoCommit():
+            return
         try:
             self.jconn.commit()
         except:
             _handle_sql_exception()
 
     def rollback(self):
+        if self.jconn.getAutoCommit():
+            return
         try:
             self.jconn.rollback()
         except:

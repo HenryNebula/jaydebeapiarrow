@@ -948,7 +948,25 @@ class HsqldbTest(IntegrationTestBase, unittest.TestCase):
         self.assertNotEqual(result[0][2], '')
         self.assertEqual(result[1][2], 'Checking Account')
 
+    def test_commit_with_autocommit_enabled(self):
+        """commit() should not raise when autocommit is enabled."""
+        self.conn.jconn.setAutoCommit(True)
+        self.conn.commit()
 
+    def test_commit_with_autocommit_disabled(self):
+        """commit() should succeed normally when autocommit is disabled."""
+        self.conn.jconn.setAutoCommit(False)
+        self.conn.commit()
+
+    def test_rollback_with_autocommit_enabled(self):
+        """rollback() should not raise when autocommit is enabled."""
+        self.conn.jconn.setAutoCommit(True)
+        self.conn.rollback()
+
+    def test_rollback_with_autocommit_disabled(self):
+        """rollback() should succeed normally when autocommit is disabled."""
+        self.conn.jconn.setAutoCommit(False)
+        self.conn.rollback()
 
 
 class PostgresTest(IntegrationTestBase, unittest.TestCase):

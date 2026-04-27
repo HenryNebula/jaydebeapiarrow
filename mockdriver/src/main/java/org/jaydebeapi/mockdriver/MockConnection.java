@@ -74,6 +74,10 @@ public abstract class MockConnection implements Connection {
     Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
   }
 
+  public final void mockAutoCommit(boolean autoCommit) throws SQLException {
+    Mockito.doReturn(autoCommit).when(this).getAutoCommit();
+  }
+
   public final void mockExceptionOnCommit(String className, String exceptionMessage)
       throws SQLException {
     Throwable exception = createException(className, exceptionMessage);

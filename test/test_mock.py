@@ -1220,6 +1220,34 @@ class MockTest(unittest.TestCase):
             self.assertIsInstance(row[0], str)
             self.assertEqual(row[0], "DummyString")
 
+    # --- Autocommit skip tests (issue #78) ---
+
+    def test_commit_skipped_when_autocommit_enabled(self):
+        """commit() should be a no-op when autocommit is enabled."""
+        self.conn.jconn.mockAutoCommit(True)
+        # Should not raise even if commit would throw an exception
+        self.conn.jconn.mockExceptionOnCommit("java.sql.SQLException",
+                                               "Cannot commit when autoCommit is enabled.")
+        self.conn.commit()  # must not raise
+
+    def test_commit_called_when_autocommit_disabled(self):
+        """commit() should call jconn.commit() when autocommit is disabled."""
+        self.conn.jconn.mockAutoCommit(False)
+        # No exception mock = default mock behavior, commit succeeds silently
+        self.conn.commit()
+
+    def test_rollback_skipped_when_autocommit_enabled(self):
+        """rollback() should be a no-op when autocommit is enabled."""
+        self.conn.jconn.mockAutoCommit(True)
+        self.conn.jconn.mockExceptionOnRollback("java.sql.SQLException",
+                                                 "Cannot rollback when autoCommit is enabled.")
+        self.conn.rollback()  # must not raise
+
+    def test_rollback_called_when_autocommit_disabled(self):
+        """rollback() should call jconn.rollback() when autocommit is disabled."""
+        self.conn.jconn.mockAutoCommit(False)
+        self.conn.rollback()
+
 
 class JarPathSpacesTest(unittest.TestCase):
     """Tests for JAR file paths containing spaces (issue #86).
