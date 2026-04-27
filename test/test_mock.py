@@ -1248,7 +1248,6 @@ class MockTest(unittest.TestCase):
         self.conn.jconn.mockAutoCommit(False)
         self.conn.rollback()
 
-
     def test_lastrowid_exists_and_is_none(self):
         """PEP-249: lastrowid attribute must exist on cursor (fixes #84)."""
         with self.conn.cursor() as cursor:
@@ -1272,6 +1271,46 @@ class MockTest(unittest.TestCase):
     def test_lastrowid_none_after_executemany(self):
         """lastrowid should be None after executemany (mock driver limitation: skip)."""
         self.skipTest("Mock driver executeBatch returns None; covered by integration test")
+
+    # --- DDL statement tests (issue #76) ---
+
+    def test_fetchone_after_ddl_returns_none(self):
+        """fetchone() after a DDL statement (no ResultSet) should return None, not raise."""
+        self.conn.jconn.mockDDLResult(0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE test (id INTEGER)")
+            result = cursor.fetchone()
+        self.assertIsNone(result)
+
+    def test_fetchall_after_ddl_returns_empty(self):
+        """fetchall() after a DDL statement (no ResultSet) should return [], not raise."""
+        self.conn.jconn.mockDDLResult(0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE test (id INTEGER)")
+            result = cursor.fetchall()
+        self.assertEqual(result, [])
+
+    def test_fetchmany_after_ddl_returns_empty(self):
+        """fetchmany() after a DDL statement (no ResultSet) should return [], not raise."""
+        self.conn.jconn.mockDDLResult(0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE test (id INTEGER)")
+            result = cursor.fetchmany(5)
+        self.assertEqual(result, [])
+
+    def test_description_after_ddl_is_none(self):
+        """cursor.description should be None after a DDL statement."""
+        self.conn.jconn.mockDDLResult(0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE test (id INTEGER)")
+        self.assertIsNone(cursor.description)
+
+    def test_rowcount_after_ddl(self):
+        """cursor.rowcount should reflect the update count after DDL."""
+        self.conn.jconn.mockDDLResult(0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE test (id INTEGER)")
+        self.assertEqual(cursor.rowcount, 0)
 
 
 class JarPathSpacesTest(unittest.TestCase):
