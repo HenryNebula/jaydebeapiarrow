@@ -2018,6 +2018,7 @@ class ParallelConnectTest(unittest.TestCase):
         errors = []
 
         def connect_and_query(idx):
+            import jpype
             try:
                 conn = jaydebeapiarrow.connect(
                     'org.hsqldb.jdbcDriver',
@@ -2029,6 +2030,9 @@ class ParallelConnectTest(unittest.TestCase):
                 conn.close()
             except Exception as e:
                 errors.append(e)
+            finally:
+                if jpype.isThreadAttachedToJVM():
+                    jpype.detachThreadFromJVM()
 
         threads = []
         for i in range(5):

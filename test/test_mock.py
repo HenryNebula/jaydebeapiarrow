@@ -1339,6 +1339,7 @@ class ParallelConnectTest(unittest.TestCase):
         errors = []
 
         def connect_thread(idx):
+            import jpype
             try:
                 conn = jaydebeapiarrow.connect(
                     'org.jaydebeapi.mockdriver.MockDriver',
@@ -1348,6 +1349,9 @@ class ParallelConnectTest(unittest.TestCase):
                 conn.close()
             except Exception as e:
                 errors.append(e)
+            finally:
+                if jpype.isThreadAttachedToJVM():
+                    jpype.detachThreadFromJVM()
 
         threads = []
         for i in range(5):
