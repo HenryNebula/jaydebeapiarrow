@@ -323,6 +323,19 @@ class IntegrationTestBase(object):
             cursor.executemany(stmt, parms)
             self.assertIsNone(cursor.lastrowid)
 
+    def test_sql_exception_message_is_clean(self):
+        """SQL exceptions should produce clean messages without JPype artefacts."""
+        with self.conn.cursor() as cursor:
+            with self.assertRaises(jaydebeapiarrow.DatabaseError) as cm:
+                cursor.execute("SELECT * FROM nonexistent_table")
+        msg = str(cm.exception)
+        # Should contain a JDBC exception class name
+        self.assertTrue("Exception" in msg, f"Expected 'Exception' in: {msg}")
+        # Should not contain duplicated class names (JPype 1.7.0+ artefact)
+        self.assertNotIn("java.sql.java.sql", msg)
+        self.assertNotIn("com.microsoft.com.microsoft", msg)
+        self.assertNotIn("oracle.jdbc.oracle.jdbc", msg)
+
     def test_execute_type_blob(self):
         stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, " \
                "STUFF) values (?, ?, ?, ?)"

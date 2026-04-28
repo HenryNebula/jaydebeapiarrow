@@ -114,6 +114,22 @@ public abstract class MockConnection implements Connection {
     Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
   }
 
+  public final void mockExceptionOnExecuteWithCause(String className, String message,
+      String causeClassName, String causeMessage) throws SQLException {
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Throwable cause = createException(causeClassName, causeMessage);
+    Throwable exception;
+    try {
+      exception = (Throwable) Class.forName(className)
+          .getConstructor(String.class, Throwable.class)
+          .newInstance(message, cause);
+    } catch (Exception e) {
+      throw new RuntimeException("Couldn't initialize class " + className + " with cause.", e);
+    }
+    Mockito.when(mockPreparedStatement.execute()).thenThrow(exception);
+    Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
+
   public final void mockBigDecimalResult(long value, int scale) throws SQLException {
     PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
     Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
