@@ -584,11 +584,12 @@ class Cursor(object):
                 return jpype.JArray(jpype.JByte)(p)
             if isinstance(p, datetime.datetime):
                 return jpype.JClass("java.sql.Timestamp").valueOf(
-                    p.strftime("%Y-%m-%d %H:%M:%S"))
+                    p.strftime("%Y-%m-%d %H:%M:%S.%f"))
             if isinstance(p, datetime.date):
                 return jpype.JClass("java.sql.Date").valueOf(p.isoformat())
             if isinstance(p, datetime.time):
-                return jpype.JClass("java.sql.Time").valueOf(p.isoformat())
+                return jpype.JClass("java.sql.Time").valueOf(
+                    p.strftime("%H:%M:%S"))
             if isinstance(p, Decimal):
                 return jpype.JClass("java.math.BigDecimal")(str(p))
             if isinstance(p, list):

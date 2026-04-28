@@ -646,6 +646,36 @@ class MockTest(unittest.TestCase):
         self.assertEqual(len(captured), 1)
         self.assertIsInstance(captured[0][1], Timestamp)
 
+    def test_to_java_datetime_preserves_microseconds(self):
+        """datetime with microseconds should preserve fractional seconds in Timestamp."""
+        import jpype
+        Timestamp = jpype.JClass("java.sql.Timestamp")
+        dt = datetime(2024, 6, 15, 10, 30, 45, 123456)
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", (dt,))
+        captured = self.conn.jconn.getCapturedSetObjectArgs()
+        self.assertEqual(len(captured), 1)
+        self.assertIsInstance(captured[0][1], Timestamp)
+        ts = captured[0][1]
+        self.assertEqual(ts.getNanos(), 123456000)
+
+    def test_to_java_datetime_mixed_params(self):
+        """datetime alongside other types should all convert correctly."""
+        import jpype
+        Timestamp = jpype.JClass("java.sql.Timestamp")
+        dt = datetime(2024, 1, 2, 3, 4, 5, 500000)
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", (42, "hello", dt, None))
+        captured = self.conn.jconn.getCapturedSetObjectArgs()
+        # None uses setNull() (not setObject), so only 3 captures
+        self.assertEqual(len(captured), 3)
+        self.assertEqual(captured[0][1], 42)
+        self.assertEqual(captured[1][1], "hello")
+        self.assertIsInstance(captured[2][1], Timestamp)
+        self.assertEqual(captured[2][1].getNanos(), 500000000)
+
     def test_to_java_date(self):
         """date should convert to java.sql.Date."""
         import jpype
@@ -663,6 +693,18 @@ class MockTest(unittest.TestCase):
         import jpype
         Time = jpype.JClass("java.sql.Time")
         t = datetime(2024, 6, 15, 10, 30, 45).time()
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", (t,))
+        captured = self.conn.jconn.getCapturedSetObjectArgs()
+        self.assertEqual(len(captured), 1)
+        self.assertIsInstance(captured[0][1], Time)
+
+    def test_to_java_time_with_microseconds(self):
+        """time with microseconds should convert to java.sql.Time without error."""
+        import jpype
+        Time = jpype.JClass("java.sql.Time")
+        t = datetime(2024, 6, 15, 10, 30, 45, 999999).time()
         self.conn.jconn.mockSetObjectCapture()
         with self.conn.cursor() as cursor:
             cursor.execute("dummy stmt", (t,))

@@ -612,6 +612,45 @@ class IntegrationTestBase(object):
             result = cursor.fetchone()
         self.assertIsNone(result[0])
 
+    def test_execute_param_datetime(self):
+        """Verify Python datetime objects round-trip correctly via parameter binding."""
+        stmt = ("insert into ACCOUNT "
+                "(ACCOUNT_ID, ACCOUNT_NO, BALANCE, OPENED_AT, OPENED_AT_TIME) "
+                "values (?, ?, ?, ?, ?)")
+        ts = datetime(2024, 6, 15, 10, 30, 45, 123456)
+        d = datetime(2024, 6, 15).date()
+        t = datetime(2024, 6, 15, 10, 30, 45).time()
+        with self.conn.cursor() as cursor:
+            cursor.execute(stmt, (ts, 40, Decimal('7.0'), d, t))
+            cursor.execute(
+                "select ACCOUNT_ID, OPENED_AT, OPENED_AT_TIME "
+                "from ACCOUNT where ACCOUNT_NO = 40")
+            result = cursor.fetchone()
+        # Timestamp: must match at least to second precision.
+        # Some drivers (Trino) truncate to milliseconds; Oracle may drop
+        # fractional seconds.  Compare the floor to whole seconds.
+        self.assertEqual(result[0].replace(microsecond=0),
+                         datetime(2024, 6, 15, 10, 30, 45))
+        # Date: some drivers (Oracle) return datetime(2024,6,15,0,0) for
+        # DATE columns; accept both forms.
+        actual_date = result[1]
+        if isinstance(actual_date, datetime):
+            actual_date = actual_date.replace(hour=0, minute=0, second=0,
+                                              microsecond=0)
+            self.assertEqual(actual_date, datetime(2024, 6, 15))
+        else:
+            self.assertEqual(actual_date, datetime(2024, 6, 15).date())
+        # Time: some drivers (Oracle) return datetime(1970,1,1,HH,MM,SS)
+        # instead of a pure time object; accept both forms.
+        actual_time = result[2]
+        if isinstance(actual_time, datetime):
+            self.assertEqual(actual_time.hour, 10)
+            self.assertEqual(actual_time.minute, 30)
+            self.assertEqual(actual_time.second, 45)
+        else:
+            self.assertEqual(actual_time.replace(microsecond=0),
+                             datetime(2024, 6, 15, 10, 30, 45).time())
+
 class SqliteTestBase(IntegrationTestBase):
 
     def setUpSql(self):
@@ -1779,6 +1818,10 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
     def test_execute_param_none(self):
         """Drill has no INSERT INTO ... VALUES — skip param none test."""
         self.skipTest("Drill does not support INSERT INTO ... VALUES")
+
+    def test_execute_param_datetime(self):
+        """Drill has no parameterized INSERT — skip datetime param test."""
+        self.skipTest("Drill does not support parameterized INSERT queries")
 
     def test_execute_different_rowcounts(self):
         """Drill has no INSERT INTO ... VALUES — skip rowcount test."""
