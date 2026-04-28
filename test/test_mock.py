@@ -25,6 +25,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+from functools import partial
 
 try:
     import unittest2 as unittest
@@ -1327,3 +1329,43 @@ except Exception as e:
             shutil.copy2(mock_jar, dest)
             stdout, stderr = self._run_connect_in_subprocess(dest)
         self.assertEqual(stdout, 'OK', f'Connection failed: {stderr}')
+
+
+class ParallelConnectTest(unittest.TestCase):
+    """Test that parallel connect() calls are thread-safe (issue #60)."""
+
+    def test_parallel_connects_after_jvm_started(self):
+        """Multiple threads connecting simultaneously should not crash."""
+        errors = []
+
+        def connect_thread(idx):
+            import jpype
+            try:
+                conn = jaydebeapiarrow.connect(
+                    'org.jaydebeapi.mockdriver.MockDriver',
+                    'jdbc:jaydebeapi://dummyurl%d' % idx)
+                # Verify the connection is usable
+                self.assertIsNotNone(conn)
+                conn.close()
+            except Exception as e:
+                errors.append(e)
+            finally:
+                if jpype.isThreadAttachedToJVM():
+                    jpype.detachThreadFromJVM()
+
+        threads = []
+        for i in range(5):
+            t = threading.Thread(target=partial(connect_thread, i))
+            threads.append(t)
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(errors, [], f"Thread errors: {errors}")
+
+    def test_jvm_startup_lock_exists(self):
+        """The _jvm_startup_lock should be a threading.Lock."""
+        self.assertTrue(hasattr(jaydebeapiarrow, '_jvm_startup_lock'))
+        self.assertIsInstance(jaydebeapiarrow._jvm_startup_lock, type(threading.Lock()))
+        self.assertTrue(hasattr(jaydebeapiarrow, '_jvm_starting'))
