@@ -291,7 +291,38 @@ class IntegrationTestBase(object):
             self.assertEqual(cursor.rowcount, 1)
             cursor.execute("select * from ACCOUNT")
             self.assertEqual(cursor.rowcount, -1)
-    
+
+    def test_lastrowid_exists_and_is_none(self):
+        """PEP-249: lastrowid attribute must exist and be None (fixes #84)."""
+        with self.conn.cursor() as cursor:
+            self.assertIsNone(cursor.lastrowid)
+
+    def test_lastrowid_none_after_select(self):
+        """lastrowid should be None after a SELECT query."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("select * from ACCOUNT")
+            self.assertIsNone(cursor.lastrowid)
+
+    def test_lastrowid_none_after_insert(self):
+        """lastrowid should be None after INSERT (JDBC doesn't expose rowid)."""
+        stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE) " \
+               "values (?, ?, ?)"
+        with self.conn.cursor() as cursor:
+            cursor.execute(stmt, (self.dbapi.Timestamp(2009, 9, 11, 14, 15, 22, 123450), 99, 1.0))
+            self.assertIsNone(cursor.lastrowid)
+
+    def test_lastrowid_none_after_executemany(self):
+        """lastrowid should be None after executemany."""
+        stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE) " \
+               "values (?, ?, ?)"
+        parms = (
+            (self.dbapi.Timestamp(2009, 9, 11, 14, 15, 22, 123450), 98, 1.0),
+            (self.dbapi.Timestamp(2009, 9, 11, 14, 15, 22, 123452), 97, 2.0),
+        )
+        with self.conn.cursor() as cursor:
+            cursor.executemany(stmt, parms)
+            self.assertIsNone(cursor.lastrowid)
+
     def test_execute_type_blob(self):
         stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, " \
                "STUFF) values (?, ?, ?, ?)"
@@ -1751,6 +1782,18 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
 
     def test_execute_different_rowcounts(self):
         """Drill has no INSERT INTO ... VALUES — skip rowcount test."""
+        self.skipTest("Drill does not support INSERT INTO ... VALUES")
+
+    def test_lastrowid_none_after_select(self):
+        """Drill uses different table schema — skip."""
+        self.skipTest("Drill test schema differs from standard ACCOUNT table")
+
+    def test_lastrowid_none_after_insert(self):
+        """Drill has no INSERT INTO ... VALUES — skip."""
+        self.skipTest("Drill does not support INSERT INTO ... VALUES")
+
+    def test_lastrowid_none_after_executemany(self):
+        """Drill has no INSERT INTO ... VALUES — skip."""
         self.skipTest("Drill does not support INSERT INTO ... VALUES")
 
     def test_execute_reset_description_without_execute_result(self):

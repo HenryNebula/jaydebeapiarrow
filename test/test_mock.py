@@ -1249,6 +1249,31 @@ class MockTest(unittest.TestCase):
         self.conn.rollback()
 
 
+    def test_lastrowid_exists_and_is_none(self):
+        """PEP-249: lastrowid attribute must exist on cursor (fixes #84)."""
+        with self.conn.cursor() as cursor:
+            self.assertIsNone(cursor.lastrowid)
+
+    def test_lastrowid_none_after_select(self):
+        """lastrowid should be None after a SELECT query."""
+        self.conn.jconn.mockBigDecimalResult(1, 0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            cursor.fetchone()
+            self.assertIsNone(cursor.lastrowid)
+
+    def test_lastrowid_none_after_insert(self):
+        """lastrowid should be None after INSERT (JDBC doesn't expose rowid)."""
+        self.conn.jconn.mockBigDecimalResult(1, 0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            self.assertIsNone(cursor.lastrowid)
+
+    def test_lastrowid_none_after_executemany(self):
+        """lastrowid should be None after executemany (mock driver limitation: skip)."""
+        self.skipTest("Mock driver executeBatch returns None; covered by integration test")
+
+
 class JarPathSpacesTest(unittest.TestCase):
     """Tests for JAR file paths containing spaces (issue #86).
 
