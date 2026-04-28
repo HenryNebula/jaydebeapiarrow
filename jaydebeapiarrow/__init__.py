@@ -196,7 +196,10 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
         dargs = [ info ]
     else:
         dargs = driver_args
-    return jpype.java.sql.DriverManager.getConnection(url, *dargs)
+    try:
+        return jpype.java.sql.DriverManager.getConnection(url, *dargs)
+    except Exception:
+        _handle_sql_exception()
 
 def _get_classpath():
     """Extract CLASSPATH from system environment as JPype doesn't seem
