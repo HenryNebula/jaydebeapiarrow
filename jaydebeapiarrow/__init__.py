@@ -112,10 +112,14 @@ _handle_sql_exception = None
 
 old_jpype = False
 
-# Lock to prevent race condition when multiple threads call connect()
-# simultaneously — without this, two threads can both see isJVMStarted()
-# return False and both attempt to start the JVM, causing a crash.
+# Flag and lock to prevent race condition when multiple threads call
+# connect() simultaneously — without this, two threads can both see
+# isJVMStarted() return False and both attempt to start the JVM,
+# causing a crash.  The lock is only held briefly to check/set the
+# flag; startJVM() runs _outside_ the lock to avoid potential
+# deadlocks if JPype spawns threads during initialisation.
 _jvm_startup_lock = threading.Lock()
+_jvm_starting = False
 
 def _handle_sql_exception_jpype():
     import jpype
@@ -136,8 +140,21 @@ def _handle_sql_exception_jpype():
 
 def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
     import jpype
+    global _jvm_starting
+
+    # Brief lock: decide who starts the JVM (if needed).
     with _jvm_startup_lock:
-        if not _is_jvm_started():
+        if _is_jvm_started():
+            should_start = False
+        elif _jvm_starting:
+            # Another thread is already starting the JVM; wait for it.
+            should_start = False
+        else:
+            _jvm_starting = True
+            should_start = True
+
+    if should_start:
+        try:
             class_path = []
             if jars:
                 class_path.extend(jars)
@@ -184,7 +201,22 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
                 jpype.startJVM(jvm_path, *args, ignoreUnrecognized=True,
                                convertStrings=True,
                                classpath=class_path)
-    
+        finally:
+            with _jvm_startup_lock:
+                _jvm_starting = False
+    elif not _is_jvm_started():
+        # Another thread is starting the JVM; spin-wait until ready.
+        waited = 0
+        while not _is_jvm_started():
+            if not _jvm_starting:
+                # Startup thread failed; bail out so the caller sees the
+                # original exception (or retries on the next connect()).
+                break
+            time.sleep(0.05)
+            waited += 0.05
+            if waited > 120:
+                raise RuntimeError("Timed out waiting for JVM to start")
+
     if not jpype.java.lang.Thread.isAttached():
         jpype.attachThreadToJVM()
         jpype.java.lang.Thread.currentThread().setContextClassLoader(jpype.java.lang.ClassLoader.getSystemClassLoader())

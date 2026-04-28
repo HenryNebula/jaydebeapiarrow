@@ -1364,3 +1364,4 @@ class ParallelConnectTest(unittest.TestCase):
         """The _jvm_startup_lock should be a threading.Lock."""
         self.assertTrue(hasattr(jaydebeapiarrow, '_jvm_startup_lock'))
         self.assertIsInstance(jaydebeapiarrow._jvm_startup_lock, type(threading.Lock()))
+        self.assertTrue(hasattr(jaydebeapiarrow, '_jvm_starting'))
