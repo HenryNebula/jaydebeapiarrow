@@ -5,6 +5,10 @@ from itertools import islice
 import pyarrow as pa
 from pyarrow.cffi import ffi as arrow_c
 
+# Set by __init__.py after JPype initialization.
+# Converts Java SQLException to Python DatabaseError.
+_handle_sql_exception = None
+
 
 def convert_jdbc_rs_to_arrow_iterator(rs, batch_size=1024):
     import jpype.imports
@@ -29,6 +33,8 @@ def fetch_next_batch(it):
             decimal_message = _find_decimal_conversion_message(e)
             if decimal_message:
                 raise RuntimeError(decimal_message) from e
+            if _handle_sql_exception is not None:
+                _handle_sql_exception()
             raise
         try:
             batch = pa.jvm.record_batch(root).to_pylist()
@@ -82,6 +88,8 @@ def read_rows_from_arrow_iterator(it, nrows=-1):
                 root.clear()
 
     except Exception as e:
+        if _handle_sql_exception is not None:
+            _handle_sql_exception()
         traceback.print_exc()
         print(f"Error converting iterator to rows: {e}")
         raise e

@@ -446,6 +446,22 @@ public abstract class MockConnection implements Connection {
     Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
   }
 
+  public final void mockExceptionOnFetch(String className, String exceptionMessage) throws SQLException {
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for exception on fetch)");
+    Mockito.when(mockPreparedStatement.getResultSet()).thenReturn(mockResultSet);
+    Mockito.when(mockResultSet.next()).thenReturn(true);
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    mockGeneralResultSetMetaData(mockMetaData, Types.DOUBLE);
+    Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
+
+    Throwable exception = createException(className, exceptionMessage);
+    Mockito.when(mockResultSet.getObject(1)).thenThrow(exception);
+    Mockito.when(mockResultSet.getDouble(1)).thenThrow(exception);
+    Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
+
   public final ResultSet verifyResultSet() {
     return Mockito.verify(mockResultSet);
   }

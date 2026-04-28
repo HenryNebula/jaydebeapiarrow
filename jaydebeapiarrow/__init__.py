@@ -115,18 +115,35 @@ def _handle_sql_exception_jpype():
     import jpype
     SQLException = jpype.java.sql.SQLException
     exc_info = sys.exc_info()
-    if old_jpype:
-        clazz = exc_info[1].__javaclass__
-        db_err = issubclass(clazz, SQLException)
-    else:
-        db_err = isinstance(exc_info[1], SQLException)
+    exc_val = exc_info[1]
+
+    # Check the exception and its cause chain for SQLException.
+    # The Arrow JDBC library wraps driver SQLExceptions in
+    # JdbcConsumerException, so we must walk the chain to find
+    # the original SQL error (e.g., divide-by-zero during fetch).
+    db_err = False
+    current = exc_val
+    while current is not None:
+        if old_jpype:
+            clazz = current.__javaclass__
+            if issubclass(clazz, SQLException):
+                db_err = True
+                break
+        else:
+            if isinstance(current, SQLException):
+                db_err = True
+                break
+        try:
+            current = current.getCause()
+        except AttributeError:
+            break
 
     if db_err:
         exc_type = DatabaseError
     else:
         exc_type = InterfaceError
-        
-    reraise(exc_type, exc_info[1], exc_info[2])
+
+    reraise(exc_type, exc_val, exc_info[2])
 
 def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
     import jpype
@@ -225,6 +242,8 @@ def _prepare_jpype():
     _jdbc_connect = _jdbc_connect_jpype
     global _handle_sql_exception
     _handle_sql_exception = _handle_sql_exception_jpype
+    from jaydebeapiarrow.lib import arrow_utils
+    arrow_utils._handle_sql_exception = _handle_sql_exception_jpype
 
 _prepare_jpype()
 
