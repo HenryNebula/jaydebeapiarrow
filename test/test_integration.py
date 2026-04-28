@@ -1227,6 +1227,24 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
         self.assertEqual(result[1], datetime(2024, 6, 15, 10, 30, 0, tzinfo=timezone.utc))
         self.assertIsNotNone(result[1].tzinfo)
 
+    def test_array_column_read(self):
+        """Verify ARRAY columns are readable as strings via ExplicitTypeMapper
+        VARCHAR fallback. Regression test for legacy issue baztian/jaydebeapi#159."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE test_array_type (id INT, data INTEGER ARRAY)")
+            try:
+                cursor.execute(
+                    "INSERT INTO test_array_type (id, data) VALUES (1, ARRAY[1,2,3])"
+                )
+                cursor.execute("SELECT data FROM test_array_type WHERE id = 1")
+                result = cursor.fetchone()
+                # Verify data is readable (degraded VARCHAR fallback — toString representation)
+                self.assertIsInstance(result[0], str)
+                # Verify cursor.description reports ARRAY type code
+                self.assertIs(cursor.description[0][1], jaydebeapiarrow.ARRAY)
+            finally:
+                cursor.execute("DROP TABLE test_array_type")
+
 
 class MySQLTest(IntegrationTestBase, unittest.TestCase):
 

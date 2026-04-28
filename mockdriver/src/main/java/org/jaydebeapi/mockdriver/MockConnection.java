@@ -360,6 +360,12 @@ public abstract class MockConnection implements Connection {
         Mockito.when(mockResultSet.getObject(1, LocalDateTime.class)).thenReturn(localDateTime);
         Mockito.when(mockResultSet.getTimestamp(1)).thenReturn(timestamp);
         break;
+      case Types.ARRAY:
+        // ExplicitTypeMapper remaps ARRAY to VARCHAR (toString fallback).
+        // Mock getString() so the Arrow adapter can read the degraded value.
+        object = "{1,2,3}";
+        Mockito.when(mockResultSet.getString(1)).thenReturn((String) object);
+        break;
       default:
         object = "DummyObject";
         break;
