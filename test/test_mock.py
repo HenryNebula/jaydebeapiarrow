@@ -710,12 +710,40 @@ class MockTest(unittest.TestCase):
         self.assertEqual(len(captured), 1)
         self.assertEqual(captured[0][1], "hello")
 
-    def test_to_java_list_raises_not_supported(self):
-        """list should raise NotSupportedError for ARRAY binding."""
+    def test_to_java_list_binds_as_array(self):
+        """list should be bound via setArray() for ARRAY type support."""
         self.conn.jconn.mockSetObjectCapture()
         with self.conn.cursor() as cursor:
-            with self.assertRaises(jaydebeapiarrow.NotSupportedError):
-                cursor.execute("dummy stmt", ([1, 2, 3],))
+            cursor.execute("dummy stmt", (["foo", "bar"],))
+        captured = self.conn.jconn.getCapturedSetArrayArgs()
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0][0], 1)  # parameter index (1-based)
+        import jpype
+        self.assertIsInstance(captured[0][1], jpype.JClass("java.sql.Array"))
+
+    def test_to_java_list_empty_binds_as_array(self):
+        """Empty list should be bound via setArray()."""
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", ([],))
+        captured = self.conn.jconn.getCapturedSetArrayArgs()
+        self.assertEqual(len(captured), 1)
+
+    def test_to_java_list_with_none_elements(self):
+        """List containing None should be bound via setArray()."""
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", (["a", None, "b"],))
+        captured = self.conn.jconn.getCapturedSetArrayArgs()
+        self.assertEqual(len(captured), 1)
+
+    def test_to_java_list_with_int_elements(self):
+        """List of ints should be stringified and bound as VARCHAR array."""
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", ([1, 2, 3],))
+        captured = self.conn.jconn.getCapturedSetArrayArgs()
+        self.assertEqual(len(captured), 1)
 
     # --- Binary data round-trip tests ---
 

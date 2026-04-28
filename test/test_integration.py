@@ -999,6 +999,49 @@ class HsqldbTest(IntegrationTestBase, unittest.TestCase):
         self.conn.jconn.setAutoCommit(False)
         self.conn.rollback()
 
+    def test_array_parameter_binding(self):
+        """Python list parameters should be bound as VARCHAR ARRAY via setArray()."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE test_array_binding (id INT, tags VARCHAR(100) ARRAY)")
+            try:
+                cursor.execute(
+                    "INSERT INTO test_array_binding (id, tags) VALUES (?, ?)",
+                    (1, ["foo", "bar", "baz"])
+                )
+                self.assertEqual(cursor.rowcount, 1)
+                # Verify the row was inserted by checking the id
+                cursor.execute("SELECT id FROM test_array_binding WHERE id = ?", (1,))
+                result = cursor.fetchone()
+                self.assertEqual(result[0], 1)
+                # Verify array contents via SQL CARDINALITY function
+                cursor.execute(
+                    "SELECT CARDINALITY(tags) FROM test_array_binding WHERE id = ?",
+                    (1,)
+                )
+                result = cursor.fetchone()
+                self.assertEqual(result[0], 3)
+            finally:
+                cursor.execute("DROP TABLE test_array_binding")
+
+    def test_empty_array_parameter_binding(self):
+        """Empty Python list should bind as an empty VARCHAR ARRAY."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE test_array_binding (id INT, tags VARCHAR(100) ARRAY)")
+            try:
+                cursor.execute(
+                    "INSERT INTO test_array_binding (id, tags) VALUES (?, ?)",
+                    (2, [])
+                )
+                self.assertEqual(cursor.rowcount, 1)
+                cursor.execute(
+                    "SELECT CARDINALITY(tags) FROM test_array_binding WHERE id = ?",
+                    (2,)
+                )
+                result = cursor.fetchone()
+                self.assertEqual(result[0], 0)
+            finally:
+                cursor.execute("DROP TABLE test_array_binding")
+
 
 class PostgresTest(IntegrationTestBase, unittest.TestCase):
 

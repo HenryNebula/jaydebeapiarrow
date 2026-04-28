@@ -591,13 +591,23 @@ class Cursor(object):
                 return jpype.JClass("java.sql.Time").valueOf(p.isoformat())
             if isinstance(p, Decimal):
                 return jpype.JClass("java.math.BigDecimal")(str(p))
-            if isinstance(p, list):
-                raise NotSupportedError(
-                    "ARRAY type parameter binding is not supported. "
-                    "Use server-side SQL functions to construct arrays, "
-                    "or cast to VARCHAR in your query."
-                )
             return p
+
+        def _to_java_array(p):
+            """Convert a Python list to a java.sql.Array for setArray()."""
+            if not p:
+                str_arr = jpype.JArray(jpype.JString)(0)
+            else:
+                str_arr = jpype.JArray(jpype.JString)(
+                    [str(x) if x is not None else None for x in p])
+            conn = statement.getConnection()
+            return conn.createArrayOf("VARCHAR", str_arr)
+
+        def _bind_param(statement, idx, p):
+            if isinstance(p, list):
+                statement.setArray(idx, _to_java_array(p))
+            else:
+                statement.setObject(idx, _to_java(p))
 
         if is_batch:
             for row in parameters:
@@ -605,14 +615,14 @@ class Cursor(object):
                     if p is None:
                         statement.setNull(i + 1, Types_NULL)
                     else:
-                        statement.setObject(i + 1, _to_java(p))
+                        _bind_param(statement, i + 1, p)
                 statement.addBatch()
         else:
             for i, p in enumerate(parameters):
                 if p is None:
                     statement.setNull(i + 1, Types_NULL)
                 else:
-                    statement.setObject(i + 1, _to_java(p))
+                    _bind_param(statement, i + 1, p)
 
     def execute(self, operation, parameters=None):
         if self._connection._closed:
