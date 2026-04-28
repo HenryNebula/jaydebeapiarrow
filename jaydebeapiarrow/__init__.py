@@ -130,19 +130,89 @@ def _handle_sql_exception_jpype():
         
     reraise(exc_type, exc_info[1], exc_info[2])
 
-def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
+def _dynamic_load_driver(jclassname, jars):
+    """Load a JDBC driver from JARs after JVM start using the DriverShim pattern.
+
+    Java's DriverManager refuses to use drivers not loaded by the system
+    classloader.  This function works around that restriction by creating a
+    URLClassLoader for the new JARs, instantiating the driver through it, and
+    registering a ``DriverShim`` proxy (loaded on the system classloader) with
+    DriverManager.
+
+    Args:
+        jclassname: Fully-qualified Java class name of the JDBC driver.
+        jars: List of JAR file paths to load the driver from.
+
+    Returns:
+        The URLClassLoader used to load the driver.
+    """
+    import jpype
+
+    # Build URLClassLoader with the new JARs, parented to system classloader
+    urls = [jpype.java.io.File(j).toURI().toURL() for j in jars]
+    url_cl = jpype.java.net.URLClassLoader(
+        urls, jpype.java.lang.ClassLoader.getSystemClassLoader()
+    )
+
+    # Load driver class from custom classloader and instantiate
+    driver_cls = url_cl.loadClass(jclassname)
+    driver = driver_cls.getDeclaredConstructor().newInstance()
+
+    # Create a DriverShim proxy and register it with DriverManager.
+    # The shim is a Python-implemented java.sql.Driver that delegates
+    # every call to the real driver loaded via URLClassLoader.
+    # DriverManager accepts the shim because it is loaded by the system CL.
+
+    @jpype.JImplements("java.sql.Driver")
+    class DriverShim:
+        def __init__(self, _driver):
+            self._driver = _driver
+        @jpype.JOverride
+        def connect(self, u, info):
+            return self._driver.connect(u, info)
+        @jpype.JOverride
+        def acceptsURL(self, u):
+            return self._driver.acceptsURL(u)
+        @jpype.JOverride
+        def getPropertyInfo(self, u, info):
+            return self._driver.getPropertyInfo(u, info)
+        @jpype.JOverride
+        def getMajorVersion(self):
+            return self._driver.getMajorVersion()
+        @jpype.JOverride
+        def getMinorVersion(self):
+            return self._driver.getMinorVersion()
+        @jpype.JOverride
+        def jdbcCompliant(self):
+            return self._driver.jdbcCompliant()
+        @jpype.JOverride
+        def getParentLogger(self):
+            return self._driver.getParentLogger()
+
+    jpype.java.sql.DriverManager.registerDriver(DriverShim(driver))
+
+    # Update thread context classloader so the driver can find its own resources
+    jpype.java.lang.Thread.currentThread().setContextClassLoader(url_cl)
+
+    return url_cl
+
+
+def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs, experimental=None):
     import jpype
     global _jvm_started_pid
 
+    _experimental = experimental or {}
+
     if _jvm_started_pid is not None and _jvm_started_pid != os.getpid():
-        raise InterfaceError(
-            "Cannot use jaydebeapiarrow in a forked process. "
-            "The JVM was started in the parent process (PID %d) but this is "
-            "PID %d. JPype does not support fork after JVM start. "
-            "Move the connect() call after the fork, or use a "
-            "post-fork-spawn worker model (e.g. gunicorn --preload with "
-            "lazy connections)." % (_jvm_started_pid, os.getpid())
-        )
+        if not _experimental.get('dynamic_classpath'):
+            raise InterfaceError(
+                "Cannot use jaydebeapiarrow in a forked process. "
+                "The JVM was started in the parent process (PID %d) but this is "
+                "PID %d. JPype does not support fork after JVM start. "
+                "Move the connect() call after the fork, or use a "
+                "post-fork-spawn worker model (e.g. gunicorn --preload with "
+                "lazy connections)." % (_jvm_started_pid, os.getpid())
+            )
 
     if not _is_jvm_started():
         class_path = []
@@ -192,7 +262,7 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
                            convertStrings=True,
                            classpath=class_path)
         _jvm_started_pid = os.getpid()
-    
+
     if not jpype.java.lang.Thread.isAttached():
         jpype.attachThreadToJVM()
         jpype.java.lang.Thread.currentThread().setContextClassLoader(jpype.java.lang.ClassLoader.getSystemClassLoader())
@@ -200,9 +270,13 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs):
         import pyarrow.jvm
     except ImportError as e:
         raise RuntimeError(f"Failed to import pyarrow.jvm ({e}). Looks like JVM is not started. Thisis required for jaydebeapiarrow to work.")
-    
+
     # register driver for DriverManager
-    jpype.JClass(jclassname)
+    if _experimental.get('dynamic_classpath') and jars and _is_jvm_started():
+        _dynamic_load_driver(jclassname, jars)
+    else:
+        jpype.JClass(jclassname)
+
     if isinstance(driver_args, dict):
         Properties = jpype.java.util.Properties
         info = Properties()
@@ -394,7 +468,7 @@ def TimestampFromTicks(ticks):
     return Timestamp(*time.localtime(ticks)[:6])
 
 # DB-API 2.0 Module Interface connect constructor
-def connect(jclassname, url, driver_args=None, jars=None, libs=None):
+def connect(jclassname, url, driver_args=None, jars=None, libs=None, experimental=None):
     """Open a connection to a database using a JDBC driver and return
     a Connection instance.
 
@@ -410,6 +484,12 @@ def connect(jclassname, url, driver_args=None, jars=None, libs=None):
     jars: Jar filename or sequence of filenames for the JDBC driver
     libs: Dll/so filenames or sequence of dlls/sos used as shared
           library by the JDBC driver
+    experimental: Optional dict of experimental feature flags.
+          Supported keys:
+            dynamic_classpath (bool): If True, allow loading JDBC drivers
+              from JARs after the JVM has already been started, using a
+              DriverShim proxy.  This also bypasses the fork-after-JVM-start
+              guard, making it suitable for gunicorn --preload workers.
     """
     if isinstance(driver_args, str):
         driver_args = [ driver_args ]
@@ -425,7 +505,9 @@ def connect(jclassname, url, driver_args=None, jars=None, libs=None):
             libs = [ libs ]
     else:
         libs = []
-    jconn = _jdbc_connect(jclassname, url, driver_args, jars, libs)
+    if experimental is None:
+        experimental = {}
+    jconn = _jdbc_connect(jclassname, url, driver_args, jars, libs, experimental=experimental)
     return Connection(jconn, jclassname)
 
 # DB-API 2.0 Connection Object

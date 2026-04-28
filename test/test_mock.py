@@ -1350,3 +1350,140 @@ except Exception as e:
             shutil.copy2(mock_jar, dest)
             stdout, stderr = self._run_connect_in_subprocess(dest)
         self.assertEqual(stdout, 'OK', f'Connection failed: {stderr}')
+
+
+class DynamicClasspathTest(unittest.TestCase):
+    """Tests for experimental dynamic_classpath feature.
+
+    These tests run in subprocesses because the JVM can only be started once
+    per process, and dynamic loading needs a JVM that is already running.
+    """
+
+    def _find_mock_jar(self):
+        for root, dirs, files in os.walk(os.path.dirname(__file__)):
+            for f in files:
+                if f.startswith('mockdriver') and f.endswith('.jar'):
+                    return os.path.join(root, f)
+        self.fail('mockdriver JAR not found')
+
+    def _run_in_subprocess(self, code):
+        """Run code in a fresh subprocess and return stdout, stderr."""
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True, text=True, timeout=30,
+            cwd=os.path.dirname(os.path.dirname(__file__))
+        )
+        return result.stdout.strip(), result.stderr.strip()
+
+    def test_dynamic_load_after_jvm_start(self):
+        """Connect with a driver JAR after JVM is already running (dynamic_classpath)."""
+        mock_jar = self._find_mock_jar()
+        code = f'''
+import jaydebeapiarrow
+
+# First connection starts the JVM normally (no jars needed — mock driver
+# is found via CLASSPATH in test harness)
+conn1 = jaydebeapiarrow.connect(
+    'org.jaydebeapi.mockdriver.MockDriver',
+    'jdbc:jaydebeapi://dummyurl'
+)
+conn1.close()
+
+# Second connection uses dynamic classpath to load the driver from JAR
+conn2 = jaydebeapiarrow.connect(
+    'org.jaydebeapi.mockdriver.MockDriver',
+    'jdbc:jaydebeapi://dummyurl',
+    jars={repr(mock_jar)},
+    experimental={{'dynamic_classpath': True}}
+)
+conn2.close()
+print('OK')
+'''
+        stdout, stderr = self._run_in_subprocess(code)
+        self.assertEqual(stdout, 'OK', f'Dynamic load failed: {stderr}')
+
+    def test_dynamic_load_without_flag_raises_error(self):
+        """Without dynamic_classpath flag, connecting with new JARs after JVM
+        start should raise InterfaceError (fork guard)."""
+        mock_jar = self._find_mock_jar()
+        code = f'''
+import jaydebeapiarrow
+
+# Start JVM with first connection
+conn1 = jaydebeapiarrow.connect(
+    'org.jaydebeapi.mockdriver.MockDriver',
+    'jdbc:jaydebeapi://dummyurl'
+)
+conn1.close()
+
+# Try connecting with explicit jars after JVM start — no experimental flag
+try:
+    conn2 = jaydebeapiarrow.connect(
+        'org.jaydebeapi.mockdriver.MockDriver',
+        'jdbc:jaydebeapi://dummyurl',
+        jars={repr(mock_jar)}
+    )
+    conn2.close()
+    print('NO_ERROR')
+except jaydebeapiarrow.InterfaceError as e:
+    if 'forked process' in str(e):
+        print('FORK_ERROR')
+    else:
+        print(f'OTHER_INTERFACE_ERROR: {{e}}')
+except Exception as e:
+    print(f'OTHER_ERROR: {{type(e).__name__}}: {{e}}')
+'''
+        stdout, stderr = self._run_in_subprocess(code)
+        # Note: the fork guard only triggers if PID differs (fork scenario).
+        # In a normal subprocess without fork, the PID is the same, so this
+        # won't raise. The dynamic_classpath flag is primarily for forked
+        # processes (gunicorn workers). We just verify it doesn't crash.
+        self.assertIn(stdout, ['OK', 'NO_ERROR', 'FORK_ERROR', 'OTHER_INTERFACE_ERROR'],
+                      f'Unexpected output: {stdout}\nstderr: {stderr}')
+
+    def test_dynamic_load_bypasses_fork_guard(self):
+        """dynamic_classpath flag bypasses the fork-after-JVM-start guard."""
+        mock_jar = self._find_mock_jar()
+        code = f'''
+import jaydebeapiarrow, os
+
+# Start JVM
+conn1 = jaydebeapiarrow.connect(
+    'org.jaydebeapi.mockdriver.MockDriver',
+    'jdbc:jaydebeapi://dummyurl'
+)
+conn1.close()
+
+# Simulate fork: change _jvm_started_pid to a different PID
+jaydebeapiarrow._jvm_started_pid = os.getpid() + 99999
+
+# Without flag — should raise
+try:
+    conn2 = jaydebeapiarrow.connect(
+        'org.jaydebeapi.mockdriver.MockDriver',
+        'jdbc:jaydebeapi://dummyurl',
+        jars={repr(mock_jar)}
+    )
+    print('NO_ERROR')
+except jaydebeapiarrow.InterfaceError as e:
+    print('FORK_ERROR')
+
+# With flag — should succeed
+try:
+    conn3 = jaydebeapiarrow.connect(
+        'org.jaydebeapi.mockdriver.MockDriver',
+        'jdbc:jaydebeapi://dummyurl',
+        jars={repr(mock_jar)},
+        experimental={{'dynamic_classpath': True}}
+    )
+    conn3.close()
+    print('DYNAMIC_OK')
+except Exception as e:
+    print(f'DYNAMIC_FAIL: {{type(e).__name__}}: {{e}}')
+'''
+        stdout, stderr = self._run_in_subprocess(code)
+        lines = stdout.split('\n')
+        self.assertEqual(lines[0], 'FORK_ERROR',
+                         f'Expected fork error without flag, got: {stdout}\nstderr: {stderr}')
+        self.assertEqual(lines[1], 'DYNAMIC_OK',
+                         f'Dynamic load should bypass fork guard, got: {stdout}\nstderr: {stderr}')

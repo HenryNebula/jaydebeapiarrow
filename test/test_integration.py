@@ -2035,3 +2035,65 @@ class ForkSafetyTest(unittest.TestCase):
             self.assertEqual(jaydebeapiarrow._jvm_started_pid, os.getpid())
         finally:
             c.close()
+
+
+class DynamicClasspathIntegrationTest(unittest.TestCase):
+    """Tests for experimental dynamic_classpath feature with real JDBC driver."""
+
+    def test_dynamic_load_hsqldb_after_jvm_start(self):
+        """Load HSQLDB driver dynamically after JVM is already running."""
+        # Find the HSQLDB JAR
+        hsqldb_jar = None
+        jar_dir = os.path.join(_THIS_DIR, 'jars')
+        if not os.path.isdir(jar_dir):
+            self.skipTest('test/jars/ directory not found (run download_jdbc_drivers.sh)')
+        for f in os.listdir(jar_dir):
+            if 'hsqldb' in f.lower() and f.endswith('.jar'):
+                hsqldb_jar = os.path.join(jar_dir, f)
+                break
+        self.assertIsNotNone(hsqldb_jar, 'HSQLDB JAR not found in test/jars/')
+
+        # Find the mock driver JAR
+        mock_jar = None
+        for root, dirs, files in os.walk(_THIS_DIR):
+            for f in files:
+                if f.startswith('mockdriver') and f.endswith('.jar'):
+                    mock_jar = os.path.join(root, f)
+                    break
+            if mock_jar:
+                break
+        self.assertIsNotNone(mock_jar, 'mockdriver JAR not found')
+
+        code = f'''
+import jaydebeapiarrow
+
+# First connection starts the JVM normally with the mock driver
+conn1 = jaydebeapiarrow.connect(
+    'org.jaydebeapi.mockdriver.MockDriver',
+    'jdbc:jaydebeapi://dummyurl',
+    jars={repr(mock_jar)}
+)
+conn1.close()
+
+# Second connection dynamically loads HSQLDB driver from JAR
+conn2 = jaydebeapiarrow.connect(
+    'org.hsqldb.jdbcDriver',
+    'jdbc:hsqldb:mem:.',
+    ['SA', ''],
+    jars={repr(hsqldb_jar)},
+    experimental={{'dynamic_classpath': True}}
+)
+cursor = conn2.cursor()
+cursor.execute('SELECT 42 AS answer FROM (VALUES(0)) AS t')
+rows = cursor.fetchall()
+cursor.close()
+conn2.close()
+print(f'OK: {{rows}}')
+'''
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True, text=True, timeout=30,
+            cwd=os.path.dirname(_THIS_DIR)
+        )
+        self.assertTrue(result.stdout.strip().startswith('OK'),
+                        f'Dynamic HSQLDB load failed:\nstdout: {result.stdout}\nstderr: {result.stderr}')
