@@ -371,12 +371,14 @@ public abstract class MockConnection implements Connection {
 
   private List<Object[]> capturedSetObjectArgs;
   private List<Object[]> capturedSetNullArgs;
+  private List<Object[]> capturedSetArrayArgs;
 
-  /** Set up a PreparedStatement that captures all setObject() and setNull() calls.
+  /** Set up a PreparedStatement that captures all setObject(), setNull() and setArray() calls.
    *  Rejects Arrow-stream binding to force the _set_stmt_parms_fallback path. */
   public final void mockSetObjectCapture() throws SQLException {
     capturedSetObjectArgs = new ArrayList<>();
     capturedSetNullArgs = new ArrayList<>();
+    capturedSetArrayArgs = new ArrayList<>();
     // Throw by default so Arrow primary path fails and fallback is triggered,
     // but allow setNull() through (needed for NULL parameter binding tests).
     PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class,
@@ -388,6 +390,7 @@ public abstract class MockConnection implements Connection {
         });
     Mockito.doReturn(true).when(mockPreparedStatement).execute();
     Mockito.doNothing().when(mockPreparedStatement).close();
+    Mockito.doReturn(this).when(mockPreparedStatement).getConnection();
     mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for setObject capture)");
     Mockito.doReturn(mockResultSet).when(mockPreparedStatement).getResultSet();
     Mockito.doReturn(false).when(mockResultSet).next();
@@ -402,6 +405,16 @@ public abstract class MockConnection implements Connection {
       capturedSetNullArgs.add(new Object[]{invocation.getArgument(0), invocation.getArgument(1)});
       return null;
     }).when(mockPreparedStatement).setNull(Mockito.anyInt(), Mockito.anyInt());
+    Mockito.doAnswer(invocation -> {
+      capturedSetArrayArgs.add(new Object[]{invocation.getArgument(0), invocation.getArgument(1)});
+      return null;
+    }).when(mockPreparedStatement).setArray(Mockito.anyInt(), Mockito.any());
+    // Stub createArrayOf to return a mock java.sql.Array
+    Mockito.doAnswer(invocation -> {
+      java.sql.Array mockArray = Mockito.mock(java.sql.Array.class);
+      Mockito.doReturn(invocation.getArgument(0)).when(mockArray).getBaseTypeName();
+      return mockArray;
+    }).when(this).createArrayOf(Mockito.anyString(), Mockito.any());
     Mockito.doReturn(mockPreparedStatement).when(this).prepareStatement(Mockito.any());
   }
 
@@ -429,6 +442,10 @@ public abstract class MockConnection implements Connection {
     return capturedSetNullArgs;
   }
 
+  public final List<Object[]> getCapturedSetArrayArgs() {
+    return capturedSetArrayArgs;
+  }
+
 
   public final void mockTimestampResult(LocalDateTime localDateTime) throws SQLException {
     PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
@@ -444,6 +461,13 @@ public abstract class MockConnection implements Connection {
     Mockito.when(mockResultSet.getTimestamp(1)).thenReturn(timestamp);
     Mockito.when(mockResultSet.getObject(1)).thenReturn(localDateTime);
     Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
+
+  @Override
+  public java.sql.Array createArrayOf(String typeName, Object[] elements) throws SQLException {
+    java.sql.Array mockArray = Mockito.mock(java.sql.Array.class);
+    Mockito.doReturn(typeName).when(mockArray).getBaseTypeName();
+    return mockArray;
   }
 
   public final ResultSet verifyResultSet() {
