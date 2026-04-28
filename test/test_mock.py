@@ -1248,7 +1248,6 @@ class MockTest(unittest.TestCase):
         self.conn.jconn.mockAutoCommit(False)
         self.conn.rollback()
 
-
     def test_lastrowid_exists_and_is_none(self):
         """PEP-249: lastrowid attribute must exist on cursor (fixes #84)."""
         with self.conn.cursor() as cursor:
@@ -1272,6 +1271,20 @@ class MockTest(unittest.TestCase):
     def test_lastrowid_none_after_executemany(self):
         """lastrowid should be None after executemany (mock driver limitation: skip)."""
         self.skipTest("Mock driver executeBatch returns None; covered by integration test")
+
+    # --- JVM args parameter test (issue #90) ---
+
+    def test_connect_accepts_jvm_args(self):
+        """connect() should accept jvm_args parameter without error."""
+        import jpype
+        # The JVM is already started by setUp, so jvm_args won't take effect,
+        # but the parameter should be accepted without raising TypeError.
+        conn = jaydebeapiarrow.connect(
+            'org.jaydebeapi.mockdriver.MockDriver',
+            'jdbc:jaydebeapi://dummyurl',
+            jvm_args=['-Duser.timezone=UTC']
+        )
+        conn.close()
 
 
 class JarPathSpacesTest(unittest.TestCase):
