@@ -999,6 +999,37 @@ class HsqldbTest(IntegrationTestBase, unittest.TestCase):
         self.conn.jconn.setAutoCommit(False)
         self.conn.rollback()
 
+    def test_fetchone_after_ddl_returns_none(self):
+        """fetchone() after a DDL statement (CREATE TABLE) should return None."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS ddl_test")
+            cursor.execute("CREATE TABLE ddl_test (id INTEGER)")
+            result = cursor.fetchone()
+        self.assertIsNone(result)
+
+    def test_fetchall_after_ddl_returns_empty(self):
+        """fetchall() after a DDL statement (CREATE TABLE) should return []."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS ddl_test2")
+            cursor.execute("CREATE TABLE ddl_test2 (id INTEGER)")
+            result = cursor.fetchall()
+        self.assertEqual(result, [])
+
+    def test_fetchmany_after_ddl_returns_empty(self):
+        """fetchmany() after a DDL statement (CREATE TABLE) should return []."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS ddl_test3")
+            cursor.execute("CREATE TABLE ddl_test3 (id INTEGER)")
+            result = cursor.fetchmany(5)
+        self.assertEqual(result, [])
+
+    def test_description_after_ddl_is_none(self):
+        """cursor.description should be None after a DDL statement."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("DROP TABLE IF EXISTS ddl_test4")
+            cursor.execute("CREATE TABLE ddl_test4 (id INTEGER)")
+        self.assertIsNone(cursor.description)
+
 
 class PostgresTest(IntegrationTestBase, unittest.TestCase):
 

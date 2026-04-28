@@ -498,4 +498,12 @@ public abstract class MockConnection implements Connection {
 
     Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
   }
+
+  /** Simulate a DDL/DML statement that returns no ResultSet (e.g. CREATE TABLE). */
+  public final void mockDDLResult(int updateCount) throws SQLException {
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Mockito.when(mockPreparedStatement.execute()).thenReturn(false);
+    Mockito.when(mockPreparedStatement.getUpdateCount()).thenReturn(updateCount);
+    Mockito.when(this.prepareStatement(Mockito.any())).thenReturn(mockPreparedStatement);
+  }
 }
