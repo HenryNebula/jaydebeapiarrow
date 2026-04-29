@@ -1000,6 +1000,44 @@ class HsqldbTest(IntegrationTestBase, unittest.TestCase):
         self.conn.rollback()
 
 
+class HsqldbMultipleConnectionsTest(unittest.TestCase):
+    """Test that multiple sequential and simultaneous connections work (issue #97)."""
+
+    def _connect(self, db_name):
+        driver = 'org.hsqldb.jdbcDriver'
+        url = f'jdbc:hsqldb:mem:{db_name}'
+        return jaydebeapiarrow.connect(driver, url, ['SA', ''])
+
+    def test_sequential_connections(self):
+        """Connect, query, close, then connect again — each cycle should succeed."""
+        for i in range(3):
+            conn = self._connect(f'seq_test_{i}')
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM (VALUES(0))")
+            rows = cursor.fetchall()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0][0], 1)
+            cursor.close()
+            conn.close()
+
+    def test_multiple_simultaneous_connections(self):
+        """Multiple open connections at the same time should work independently."""
+        connections = []
+        for i in range(3):
+            conn = self._connect(f'sim_test_{i}')
+            connections.append(conn)
+
+        for conn in connections:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM (VALUES(0))")
+            rows = cursor.fetchall()
+            self.assertEqual(len(rows), 1)
+            cursor.close()
+
+        for conn in connections:
+            conn.close()
+
+
 class PostgresTest(IntegrationTestBase, unittest.TestCase):
 
     def connect(self):
