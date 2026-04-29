@@ -2007,3 +2007,12 @@ conn.close()
             )
             self.assertTrue(result.stdout.strip().startswith('OK'),
                             f'Connection failed: {result.stdout}\n{result.stderr}')
+
+    def test_connect_url_must_be_string(self):
+        """Passing a list as url should raise ProgrammingError (issue #95)."""
+        with self.assertRaises(jaydebeapiarrow.ProgrammingError) as ctx:
+            jaydebeapiarrow.connect(
+                'org.hsqldb.jdbcDriver',
+                ['jdbc:hsqldb:mem:.', 'SA', '']
+            )
+        self.assertIn('url', str(ctx.exception).lower())

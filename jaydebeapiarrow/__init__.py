@@ -396,6 +396,14 @@ def connect(jclassname, url, driver_args=None, jars=None, libs=None):
     libs: Dll/so filenames or sequence of dlls/sos used as shared
           library by the JDBC driver
     """
+    if not isinstance(url, str):
+        raise ProgrammingError(
+            "The 'url' parameter must be a JDBC connection string, "
+            "not %s. If you meant to pass connection credentials, "
+            "use the 'driver_args' parameter. "
+            "Usage: connect(jclassname, url, driver_args=None, jars=None, libs=None)"
+            % type(url).__name__
+        )
     if isinstance(driver_args, str):
         driver_args = [ driver_args ]
     if not driver_args:
