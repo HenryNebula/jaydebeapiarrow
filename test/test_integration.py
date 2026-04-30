@@ -2007,3 +2007,164 @@ conn.close()
             )
             self.assertTrue(result.stdout.strip().startswith('OK'),
                             f'Connection failed: {result.stdout}\n{result.stderr}')
+
+
+class ForkSafetyTest(unittest.TestCase):
+    """Tests for fork-safety guard (legacy issue #232)."""
+
+    def test_fork_after_connect_raises_interface_error(self):
+        """Simulating a fork by overwriting the PID tracker must raise
+        InterfaceError when attempting a new connection."""
+        import os
+        original_pid = jaydebeapiarrow._jvm_started_pid
+        try:
+            jaydebeapiarrow._jvm_started_pid = os.getpid() + 99999
+            with self.assertRaises(jaydebeapiarrow.InterfaceError) as ctx:
+                jaydebeapiarrow.connect('org.hsqldb.jdbcDriver',
+                                        'jdbc:hsqldb:mem:.', ['SA', ''])
+            self.assertIn("forked process", str(ctx.exception))
+        finally:
+            jaydebeapiarrow._jvm_started_pid = original_pid
+
+    def test_pid_recorded_after_connect(self):
+        """After connect(), _jvm_started_pid must equal the current PID."""
+        import os
+        c = jaydebeapiarrow.connect('org.hsqldb.jdbcDriver',
+                                    'jdbc:hsqldb:mem:.', ['SA', ''])
+        try:
+            self.assertEqual(jaydebeapiarrow._jvm_started_pid, os.getpid())
+        finally:
+            c.close()
+
+
+class DynamicClasspathIntegrationTest(unittest.TestCase):
+    """Tests for experimental dynamic_classpath feature with real JDBC driver."""
+
+    def _find_hsqldb_jar(self):
+        jar_dir = os.path.join(_THIS_DIR, 'jars')
+        if not os.path.isdir(jar_dir):
+            self.skipTest('test/jars/ directory not found (run download_jdbc_drivers.sh)')
+        for f in os.listdir(jar_dir):
+            if 'hsqldb' in f.lower() and f.endswith('.jar'):
+                return os.path.join(jar_dir, f)
+        self.skipTest('HSQLDB JAR not found in test/jars/')
+
+    def _find_mock_jar(self):
+        for root, dirs, files in os.walk(_THIS_DIR):
+            for f in files:
+                if f.startswith('mockdriver') and f.endswith('.jar'):
+                    return os.path.join(root, f)
+        self.skipTest('mockdriver JAR not found')
+
+    def _run_in_subprocess(self, code):
+        return subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True, text=True, timeout=30,
+            cwd=os.path.dirname(_THIS_DIR)
+        )
+
+    def test_hsqldb_fails_without_dynamic_classpath(self):
+        """Connecting to HSQLDB after JVM starts with only mock driver on classpath
+        should fail — the HSQLDB driver is not available."""
+        hsqldb_jar = self._find_hsqldb_jar()
+        mock_jar = self._find_mock_jar()
+
+        # Start JVM with CLASSPATH pointing only to mock JAR (no HSQLDB)
+        env = {**os.environ, 'CLASSPATH': mock_jar}
+        code = f'''
+import jaydebeapiarrow
+
+# Start JVM with only the mock driver available
+conn1 = jaydebeapiarrow.connect(
+    'org.jaydebeapi.mockdriver.MockDriver',
+    'jdbc:jaydebeapi://dummyurl'
+)
+conn1.close()
+
+# Try to connect to HSQLDB without dynamic classpath — should fail
+# because HSQLDB driver was never loaded
+try:
+    conn2 = jaydebeapiarrow.connect(
+        'org.hsqldb.jdbcDriver',
+        'jdbc:hsqldb:mem:.',
+        ['SA', '']
+    )
+    conn2.close()
+    print('UNEXPECTED_SUCCESS')
+except Exception as e:
+    print(f'EXPECTED_FAIL: {{type(e).__name__}}')
+'''
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True, text=True, timeout=30,
+            cwd=os.path.dirname(_THIS_DIR),
+            env=env
+        )
+        self.assertTrue(result.stdout.strip().startswith('EXPECTED_FAIL'),
+                        f'HSQLDB should fail without dynamic classpath.\n'
+                        f'stdout: {result.stdout}\nstderr: {result.stderr}')
+
+    def test_dynamic_load_hsqldb_after_jvm_start(self):
+        """Dynamically load HSQLDB driver after JVM is already running.
+        Starts JVM with only the mock driver, then loads HSQLDB from JAR."""
+        hsqldb_jar = self._find_hsqldb_jar()
+        mock_jar = self._find_mock_jar()
+
+        # Start JVM with CLASSPATH pointing only to mock JAR (no HSQLDB)
+        env = {**os.environ, 'CLASSPATH': mock_jar}
+        code = f'''
+import jaydebeapiarrow
+
+# Start JVM with only the mock driver on the classpath
+conn1 = jaydebeapiarrow.connect(
+    'org.jaydebeapi.mockdriver.MockDriver',
+    'jdbc:jaydebeapi://dummyurl'
+)
+conn1.close()
+
+# Verify HSQLDB is NOT available yet
+try:
+    conn_bad = jaydebeapiarrow.connect(
+        'org.hsqldb.jdbcDriver',
+        'jdbc:hsqldb:mem:.',
+        ['SA', '']
+    )
+    conn_bad.close()
+    print('HSQQLDB_AVAILABLE_WITHOUT_DYNAMIC')
+except Exception:
+    print('HSQQLDB_NOT_AVAILABLE')
+
+# Now dynamically load HSQLDB driver from JAR
+conn2 = jaydebeapiarrow.connect(
+    'org.hsqldb.jdbcDriver',
+    'jdbc:hsqldb:mem:.',
+    ['SA', ''],
+    jars={repr(hsqldb_jar)},
+    experimental={{'dynamic_classpath': True}}
+)
+cursor = conn2.cursor()
+
+# Verify it actually works — run real SQL
+cursor.execute('CREATE TABLE test_dynamic (id INTEGER, name VARCHAR(50))')
+cursor.execute("INSERT INTO test_dynamic VALUES (1, 'hello'), (2, 'world')")
+cursor.execute('SELECT id, name FROM test_dynamic ORDER BY id')
+rows = cursor.fetchall()
+cursor.execute('DROP TABLE test_dynamic')
+cursor.close()
+conn2.close()
+
+print(f'DYNAMIC_OK: {{rows}}')
+'''
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True, text=True, timeout=30,
+            cwd=os.path.dirname(_THIS_DIR),
+            env=env
+        )
+        lines = result.stdout.strip().split('\n')
+        self.assertEqual(lines[0], 'HSQQLDB_NOT_AVAILABLE',
+                         f'HSQLDB should not be available before dynamic load.\n'
+                         f'stdout: {result.stdout}\nstderr: {result.stderr}')
+        self.assertEqual(lines[1], 'DYNAMIC_OK: [(1, \'hello\'), (2, \'world\')]',
+                         f'Dynamic HSQLDB load failed or returned wrong data.\n'
+                         f'stdout: {result.stdout}\nstderr: {result.stderr}')
