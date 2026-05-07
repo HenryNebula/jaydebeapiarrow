@@ -43,7 +43,7 @@ class MockTest(unittest.TestCase):
         self.conn.close()
 
     # JDBC types not supported by the Arrow data path (no Arrow type mapping)
-    _ARROW_UNSUPPORTED_TYPES = {'OTHER', 'NCLOB', 'SQLXML', 'ROWID', 'ARRAY',
+    _ARROW_UNSUPPORTED_TYPES = {'OTHER', 'NCLOB', 'SQLXML', 'ROWID',
                                 'TIME_WITH_TIMEZONE', 'TIMESTAMP_WITH_TIMEZONE'}
 
     def test_all_db_api_type_objects_have_valid_mapping(self):
@@ -1150,3 +1150,15 @@ class MockTest(unittest.TestCase):
     def test_lastrowid_none_after_executemany(self):
         """lastrowid should be None after executemany (mock driver limitation: skip)."""
         self.skipTest("Mock driver executeBatch returns None; covered by integration test")
+
+    # --- ARRAY type tests (legacy issue #159) ---
+
+    def test_array_column_returns_string_via_varchar_fallback(self):
+        """ARRAY columns are degraded to VARCHAR by ExplicitTypeMapper and
+        returned as Python strings (toString representation)."""
+        self.conn.jconn.mockType("ARRAY")
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertIsInstance(result[0], str)
+        self.assertEqual(result[0], "{1,2,3}")

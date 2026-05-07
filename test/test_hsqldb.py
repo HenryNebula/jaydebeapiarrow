@@ -62,3 +62,32 @@ class HsqldbMultipleConnectionsTest(unittest.TestCase):
 
         for conn in connections:
             conn.close()
+
+
+class HsqldbArrayTypeTest(unittest.TestCase):
+    """Verify ARRAY type handling with HSQLDB (legacy issue baztian/jaydebeapi#159)."""
+
+    def setUp(self):
+        driver = 'org.hsqldb.jdbcDriver'
+        url = 'jdbc:hsqldb:mem:array_test'
+        self.conn = jaydebeapiarrow.connect(driver, url, ['SA', ''],
+                                            experimental={'jvm_args': _SUPPRESS_LOGGING_ARGS})
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_array_column_read(self):
+        """Verify ARRAY columns are readable as strings via ExplicitTypeMapper
+        VARCHAR fallback. Regression test for legacy issue baztian/jaydebeapi#159."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE test_array_type (id INT, data INTEGER ARRAY)")
+            try:
+                cursor.execute(
+                    "INSERT INTO test_array_type (id, data) VALUES (1, ARRAY[1,2,3])"
+                )
+                cursor.execute("SELECT data FROM test_array_type WHERE id = 1")
+                result = cursor.fetchone()
+                self.assertIsInstance(result[0], str)
+                self.assertIs(cursor.description[0][1], jaydebeapiarrow.ARRAY)
+            finally:
+                cursor.execute("DROP TABLE IF EXISTS test_array_type")
