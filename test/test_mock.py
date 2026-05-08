@@ -746,6 +746,14 @@ class MockTest(unittest.TestCase):
             result = cursor.fetchone()
         self.assertEqual(result[0], b'')
 
+    # --- Connection error handling tests (legacy #218) ---
+
+    def test_connect_failure_raises_database_error(self):
+        """Connection failure should raise DatabaseError, not raw Java exception."""
+        with self.assertRaises(jaydebeapiarrow.DatabaseError):
+            jaydebeapiarrow.connect('org.jaydebeapi.mockdriver.MockDriver',
+                                    'jdbc:jaydebeapi://fail-connect')
+
     # --- DBAPITypeObject mapping tests ---
 
     def test_description_returns_column_label_not_name(self):
