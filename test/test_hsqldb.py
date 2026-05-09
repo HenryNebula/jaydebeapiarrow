@@ -62,3 +62,40 @@ class HsqldbMultipleConnectionsTest(unittest.TestCase):
 
         for conn in connections:
             conn.close()
+
+
+class HsqldbArrayTypeTest(unittest.TestCase):
+    """Test ARRAY type support — reading (VARCHAR fallback) and writing (list binding)."""
+
+    def setUp(self):
+        self.conn = jaydebeapiarrow.connect(
+            'org.hsqldb.jdbcDriver', 'jdbc:hsqldb:mem:arraytest',
+            ['SA', ''],
+            experimental={'jvm_args': _SUPPRESS_LOGGING_ARGS})
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "CREATE TABLE test_arrays (id INT, tags VARCHAR(100) ARRAY)")
+            cursor.execute(
+                "INSERT INTO test_arrays VALUES (1, ARRAY['foo', 'bar', 'baz'])")
+
+    def tearDown(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("DROP TABLE test_arrays IF EXISTS")
+        self.conn.close()
+
+    def test_array_column_read_as_varchar_string(self):
+        """ARRAY column currently returns as VARCHAR string (pyarrow.jvm List limitation)."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT tags FROM test_arrays WHERE id = 1")
+            result = cursor.fetchone()
+        self.assertIsInstance(result[0], str)
+
+    def test_array_parameter_binding(self):
+        """Python list parameters should be bindable as SQL ARRAYs."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO test_arrays (id, tags) VALUES (?, ?)",
+                (4, ["one", "two"]))
+            cursor.execute("SELECT tags FROM test_arrays WHERE id = 4")
+            result = cursor.fetchone()
+        self.assertIsInstance(result[0], str)

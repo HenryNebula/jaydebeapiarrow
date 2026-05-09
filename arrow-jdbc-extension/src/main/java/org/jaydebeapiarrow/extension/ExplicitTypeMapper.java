@@ -190,14 +190,15 @@ public class ExplicitTypeMapper {
                     columnIndex, resultSet.getMetaData().getColumnName(columnIndex)));
         }
 
-        /* Detect ARRAY columns - not natively supported by Arrow JDBC adapter.
-         * Map to VARCHAR as a degraded fallback (toString representation). */
+        /* ARRAY columns — reading still requires VARCHAR fallback because
+         * pyarrow.jvm.record_batch() does not support Arrow List type.
+         * Element type inference is in createArraySubTypeMapping() for future use
+         * when reading switches to the Arrow C Data Interface. */
         List<Integer> arrayColumnIndices = parsedMetaData.getOrDefault(Types.ARRAY, new ArrayList<>());
         for (int columnIndex : arrayColumnIndices) {
             explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
-            logger.warning(String.format(
-                    "Column %1s (%2s) is ARRAY type, which is not natively supported. "
-                    + "Falling back to VARCHAR (toString representation).",
+            logger.fine(String.format(
+                    "Column %1s (%2s) is ARRAY type, mapping to VARCHAR (pyarrow.jvm List limitation).",
                     columnIndex, resultSet.getMetaData().getColumnName(columnIndex)));
         }
 
@@ -215,6 +216,95 @@ public class ExplicitTypeMapper {
         }
 
         return explicitMapping;
+    }
+
+    /**
+     * Build element-type mappings for ARRAY columns so the upstream Arrow JDBC
+     * adapter can create the correct ListVector child vectors.
+     * Called separately from createExplicitTypeMapping because the Arrow config
+     * builder consumes these via a dedicated setter.
+     */
+    public Map<Integer, JdbcFieldInfo> createArraySubTypeMapping(ResultSet resultSet) throws SQLException {
+        Map<Integer, JdbcFieldInfo> arraySubTypes = new HashMap<>();
+        ResultSetMetaData metaData = resultSet.getMetaData();
+
+        for (int columnIndex = 1; columnIndex <= metaData.getColumnCount(); columnIndex++) {
+            if (metaData.getColumnType(columnIndex) != Types.ARRAY) {
+                continue;
+            }
+
+            String typeName = metaData.getColumnTypeName(columnIndex);
+            JdbcFieldInfo elementFieldInfo = inferElementJdbcType(typeName);
+            arraySubTypes.put(columnIndex, elementFieldInfo);
+
+            logger.fine(String.format(
+                    "ARRAY column %d (%s) element type inferred as %s from type name '%s'",
+                    columnIndex, metaData.getColumnName(columnIndex),
+                    JDBCType.valueOf(elementFieldInfo.getJdbcType()).getName(), typeName));
+        }
+        return arraySubTypes;
+    }
+
+    /**
+     * Infer the JDBC element type of a SQL ARRAY column from its type name.
+     * SQL ARRAYs are homogeneous, so one element type describes the whole column.
+     * Falls back to VARCHAR when the type name is unrecognized — getString() works
+     * for any JDBC type, so elements come through as strings.
+     */
+    /*package*/ JdbcFieldInfo inferElementJdbcType(String columnTypeName) {
+        String upper = columnTypeName.toUpperCase().trim();
+
+        // PostgreSQL: _int4, _int8, _float4, _float8, _varchar, _text, _bool
+        // HSQLDB:     INTEGER ARRAY, VARCHAR ARRAY, etc.
+        // Generic:    INT[], VARCHAR[], TIMESTAMP[], etc.
+
+        if (upper.equals("_INT4") || upper.equals("_INT") || upper.contains("INTEGER ARRAY")
+                || upper.equals("INT[]") || upper.equals("INT ARRAY")) {
+            return new JdbcFieldInfo(Types.INTEGER);
+        }
+        if (upper.equals("_INT8") || upper.contains("BIGINT ARRAY")
+                || upper.equals("BIGINT[]") || upper.equals("BIGINT ARRAY")) {
+            return new JdbcFieldInfo(Types.BIGINT);
+        }
+        if (upper.equals("_FLOAT4") || upper.contains("REAL ARRAY")
+                || upper.equals("REAL[]") || upper.equals("FLOAT[]")) {
+            return new JdbcFieldInfo(Types.REAL);
+        }
+        if (upper.equals("_FLOAT8") || upper.contains("DOUBLE PRECISION ARRAY")
+                || upper.contains("DOUBLE ARRAY") || upper.equals("DOUBLE[]")) {
+            return new JdbcFieldInfo(Types.DOUBLE);
+        }
+        if (upper.equals("_BOOL") || upper.contains("BOOLEAN ARRAY")
+                || upper.equals("BOOLEAN[]")) {
+            return new JdbcFieldInfo(Types.BOOLEAN);
+        }
+        if (upper.equals("_VARCHAR") || upper.equals("_TEXT")
+                || upper.contains("CHARACTER VARYING ARRAY")
+                || upper.contains("VARCHAR ARRAY") || upper.contains("VARCHAR[]")
+                || upper.contains("TEXT ARRAY") || upper.contains("TEXT[]")) {
+            return new JdbcFieldInfo(Types.VARCHAR);
+        }
+        if (upper.contains("DECIMAL ARRAY") || upper.contains("NUMERIC ARRAY")
+                || upper.equals("DECIMAL[]") || upper.equals("NUMERIC[]")) {
+            return new JdbcFieldInfo(Types.DECIMAL);
+        }
+        if (upper.contains("DATE ARRAY") || upper.equals("DATE[]")) {
+            return new JdbcFieldInfo(Types.DATE);
+        }
+        if (upper.contains("TIMESTAMP WITH TIME ZONE ARRAY")
+                || upper.equals("TIMESTAMPTZ[]")) {
+            return new JdbcFieldInfo(Types.TIMESTAMP_WITH_TIMEZONE);
+        }
+        if (upper.contains("TIMESTAMP ARRAY") || upper.equals("TIMESTAMP[]")
+                || upper.contains("TIMESTAMP WITHOUT TIME ZONE ARRAY")) {
+            return new JdbcFieldInfo(Types.TIMESTAMP);
+        }
+
+        logger.warning(String.format(
+                "Unknown ARRAY element type name '%s', defaulting to VARCHAR element type. "
+                + "Array elements will be returned as strings.",
+                columnTypeName));
+        return new JdbcFieldInfo(Types.VARCHAR);
     }
 
 }

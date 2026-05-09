@@ -700,12 +700,36 @@ class MockTest(unittest.TestCase):
         self.assertEqual(len(captured), 1)
         self.assertEqual(captured[0][1], "hello")
 
-    def test_to_java_list_raises_not_supported(self):
-        """list should raise NotSupportedError for ARRAY binding."""
+    def test_to_java_int_list_binds_as_array(self):
+        """Integer list should be converted to Java int[] and bound via setObject."""
         self.conn.jconn.mockSetObjectCapture()
         with self.conn.cursor() as cursor:
-            with self.assertRaises(jaydebeapiarrow.NotSupportedError):
-                cursor.execute("dummy stmt", ([1, 2, 3],))
+            cursor.execute("dummy stmt", ([1, 2, 3],))
+        captured = self.conn.jconn.getCapturedSetObjectArgs()
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0][0], 1)  # parameter index (1-based)
+        import jpype
+        self.assertIsInstance(captured[0][1], jpype.JArray)
+
+    def test_to_java_string_list_binds_as_array(self):
+        """String list should be converted to Java String[] and bound via setObject."""
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", (["foo", "bar"],))
+        captured = self.conn.jconn.getCapturedSetObjectArgs()
+        self.assertEqual(len(captured), 1)
+        import jpype
+        self.assertIsInstance(captured[0][1], jpype.JArray)
+
+    def test_to_java_empty_list_binds_as_array(self):
+        """Empty list should be converted to empty Java String[]."""
+        self.conn.jconn.mockSetObjectCapture()
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt", ([],))
+        captured = self.conn.jconn.getCapturedSetObjectArgs()
+        self.assertEqual(len(captured), 1)
+        import jpype
+        self.assertIsInstance(captured[0][1], jpype.JArray)
 
     # --- Binary data round-trip tests ---
 

@@ -137,6 +137,7 @@ public class JDBCUtils {
 
     public static ArrowVectorIterator convertResultSetToIterator(ResultSet resultSet, int batchSize) throws Exception {
         BufferAllocator allocator = AllocatorSingleton.getChildAllocator();
+        ExplicitTypeMapper typeMapper = new ExplicitTypeMapper();
         OverriddenConsumer overriden_consumer = new OverriddenConsumer();
         JdbcToArrowConfig arrow_jdbc_config = (
             new JdbcToArrowConfigBuilder()
@@ -144,7 +145,7 @@ public class JDBCUtils {
             .setCalendar(utcCalendar)
             .setTargetBatchSize(batchSize)
             .setBigDecimalRoundingMode(RoundingMode.HALF_UP)
-            .setExplicitTypesByColumnIndex(new ExplicitTypeMapper().createExplicitTypeMapping(resultSet))
+            .setExplicitTypesByColumnIndex(typeMapper.createExplicitTypeMapping(resultSet))
             .setIncludeMetadata(true)
             .setJdbcToArrowTypeConverter((jdbcFieldInfo) -> overriden_consumer.getJdbcToArrowTypeConverter(jdbcFieldInfo))
             .setJdbcConsumerGetter(OverriddenConsumer::getConsumer)

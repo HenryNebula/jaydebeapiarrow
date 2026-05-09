@@ -688,26 +688,79 @@ class Cursor(object):
                 return jpype.JArray(jpype.JByte)(p)
             if isinstance(p, datetime.datetime):
                 return jpype.JClass("java.sql.Timestamp").valueOf(
-                    p.strftime("%Y-%m-%d %H:%M:%S"))
+                    p.strftime("%Y-%m-%d %H:%M:%S.%f"))
             if isinstance(p, datetime.date):
                 return jpype.JClass("java.sql.Date").valueOf(p.isoformat())
             if isinstance(p, datetime.time):
-                return jpype.JClass("java.sql.Time").valueOf(p.isoformat())
+                return jpype.JClass("java.sql.Time").valueOf(p.strftime("%H:%M:%S"))
             if isinstance(p, Decimal):
                 return jpype.JClass("java.math.BigDecimal")(str(p))
             if isinstance(p, list):
-                raise NotSupportedError(
-                    "ARRAY type parameter binding is not supported. "
-                    "Use server-side SQL functions to construct arrays, "
-                    "or cast to VARCHAR in your query."
-                )
+                return _list_to_java_array(p)
             return p
+
+        def _list_to_java_array(lst):
+            """Convert a Python list to a Java array for setArray() binding."""
+            if not lst:
+                return jpype.JArray(jpype.JString)(0)
+
+            # Infer element type from first non-None element
+            sample = None
+            for item in lst:
+                if item is not None:
+                    sample = item
+                    break
+
+            if sample is None:
+                return jpype.JArray(jpype.JString)([None] * len(lst))
+            if isinstance(sample, bool):
+                return jpype.JArray(jpype.JBoolean)(lst)
+            if isinstance(sample, int):
+                return jpype.JArray(jpype.JInt)(lst)
+            if isinstance(sample, float):
+                return jpype.JArray(jpype.JDouble)(lst)
+            if isinstance(sample, str):
+                return jpype.JArray(jpype.JString)(lst)
+            if isinstance(sample, Decimal):
+                return jpype.JArray(jpype.JString)([str(x) for x in lst])
+
+            return jpype.JArray(jpype.JString)([str(x) for x in lst])
+
+        def _bind_param(stmt, idx, p):
+            """Bind a parameter, using setArray for list values."""
+            if isinstance(p, list):
+                java_arr = _list_to_java_array(p)
+                try:
+                    conn = stmt.getConnection()
+                    sql_type = _infer_sql_type_name(java_arr)
+                    sql_array = conn.createArrayOf(sql_type, java_arr)
+                    stmt.setArray(idx, sql_array)
+                except Exception:
+                    stmt.setObject(idx, java_arr)
+            else:
+                stmt.setObject(idx, _to_java(p))
+
+        def _infer_sql_type_name(java_arr):
+            """Map a Java array class to its SQL type name for createArrayOf()."""
+            import jpype
+            cls = java_arr.getClass().getComponentType()
+            if cls == jpype.JBoolean:
+                return "BOOLEAN"
+            if cls == jpype.JInt:
+                return "INTEGER"
+            if cls == jpype.JDouble:
+                return "DOUBLE"
+            if cls == jpype.JString:
+                return "VARCHAR"
+            return "VARCHAR"
 
         if is_batch:
             for row in parameters:
                 for i, p in enumerate(row):
                     if p is None:
                         statement.setNull(i + 1, Types_NULL)
+                    elif isinstance(p, list):
+                        _bind_param(statement, i + 1, p)
                     else:
                         statement.setObject(i + 1, _to_java(p))
                 statement.addBatch()
@@ -715,6 +768,8 @@ class Cursor(object):
             for i, p in enumerate(parameters):
                 if p is None:
                     statement.setNull(i + 1, Types_NULL)
+                elif isinstance(p, list):
+                    _bind_param(statement, i + 1, p)
                 else:
                     statement.setObject(i + 1, _to_java(p))
 
