@@ -190,17 +190,8 @@ public class ExplicitTypeMapper {
                     columnIndex, resultSet.getMetaData().getColumnName(columnIndex)));
         }
 
-        /* ARRAY columns — reading still requires VARCHAR fallback because
-         * pyarrow.jvm.record_batch() does not support Arrow List type.
-         * Element type inference is in createArraySubTypeMapping() for future use
-         * when reading switches to the Arrow C Data Interface. */
-        List<Integer> arrayColumnIndices = parsedMetaData.getOrDefault(Types.ARRAY, new ArrayList<>());
-        for (int columnIndex : arrayColumnIndices) {
-            explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
-            logger.fine(String.format(
-                    "Column %1s (%2s) is ARRAY type, mapping to VARCHAR (pyarrow.jvm List limitation).",
-                    columnIndex, resultSet.getMetaData().getColumnName(columnIndex)));
-        }
+        /* ARRAY columns are now read natively via the C Data Interface.
+         * Element type mapping is handled by createArraySubTypeMapping(). */
 
         for (int columnIndex: decimalColumnIndices) {
             int precision = resultSet.getMetaData().getPrecision(columnIndex);

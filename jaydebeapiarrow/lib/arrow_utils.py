@@ -6,6 +6,18 @@ import pyarrow as pa
 from pyarrow.cffi import ffi as arrow_c
 
 
+def _import_batch_via_cdata(root):
+    """Import a Java VectorSchemaRoot as a PyArrow RecordBatch via C Data Interface."""
+    import jpype.imports
+    from org.jaydebeapiarrow.extension import JDBCUtils
+
+    addresses = JDBCUtils.exportNextBatch(root)
+    array_ptr = int(addresses[0])
+    schema_ptr = int(addresses[1])
+
+    return pa.RecordBatch._import_from_c(array_ptr, schema_ptr)
+
+
 def convert_jdbc_rs_to_arrow_iterator(rs, batch_size=1024):
     import jpype.imports
     from org.jaydebeapiarrow.extension import JDBCUtils
@@ -31,7 +43,7 @@ def fetch_next_batch(it):
                 raise RuntimeError(decimal_message) from e
             raise
         try:
-            batch = pa.jvm.record_batch(root).to_pylist()
+            batch = _import_batch_via_cdata(root).to_pylist()
             rows = [tuple(r.values()) for r in batch]
             return rows
         finally:
@@ -69,7 +81,7 @@ def read_rows_from_arrow_iterator(it, nrows=-1):
             if root is None:
                 break
             try:
-                batch = pa.jvm.record_batch(root).to_pylist()
+                batch = _import_batch_via_cdata(root).to_pylist()
                 _rows = [tuple(r.values()) for r in batch]
                 if nrows_remaining > 0:
                     _rows = _rows[:min(len(_rows), nrows_remaining)]
