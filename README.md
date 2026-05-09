@@ -171,14 +171,16 @@ Database connection defaults (overridable via environment variables):
 
 This approach was inspired by [Uwe Korn's work on pyarrow.jvm](https://uwekorn.com/2019/11/17/fast-jdbc-access-in-python-using-pyarrow-jvm.html) (Apache Drill) and [Razvi Noorul's Trino benchmarks](https://medium.com/@noorulrazvi/trino-jdbc-access-in-python-using-pyarrow-jvm-d1b75fe039ee), both demonstrating 100x+ speedups by using Arrow to bypass JPype's row-by-row serialization.
 
-Our benchmarks (local PostgreSQL, 5M rows, 4 columns) show a **~20x speedup** over plain jaydebeapi. The difference in multiplier is due to methodology: both posts tested against distributed query engines (Drill, Trino) over network connections, which have much higher per-row JDBC overhead. PostgreSQL's JDBC driver is significantly faster at row retrieval, so the baseline is lower and there's less headroom for a multiplier. The absolute Arrow throughput is comparable across all three.
+Our benchmarks (local PostgreSQL, 5M rows, 4 columns) show a **23.7x speedup** over plain jaydebeapi using the Native Arrow API. The difference in multiplier vs the referenced posts is due to methodology: they tested against distributed query engines (Drill, Trino) over network connections with higher per-row JDBC overhead. PostgreSQL's JDBC driver is fast at row retrieval, so the baseline is lower. The absolute Arrow throughput is comparable across all three.
+
+The reading path uses the Arrow **C Data Interface** (`Data.exportVectorSchemaRoot` → `pa.RecordBatch._import_from_c`), which bypasses `pyarrow.jvm` entirely. This brings the Native Arrow API to within **6% of psycopg2**, a native C driver.
 
 | Method | 5M rows | Throughput | vs jaydebeapi |
 |---|---|---|---|
-| jaydebeapi (baseline) | 198.66s | 25K rows/s | — |
-| Drop-in replacement | 25.82s | 194K rows/s | 7.7x |
-| Native Arrow API | 9.38s | 542K rows/s | **21.2x** |
-| Psycopg2 (native driver) | 7.34s | 682K rows/s | 27x |
+| jaydebeapi (baseline) | 180.1s | 28K rows/s | — |
+| Drop-in replacement | 26.5s | 189K rows/s | 6.8x |
+| Native Arrow API (C Data Interface) | 7.6s | 658K rows/s | **23.7x** |
+| Psycopg2 (native driver) | 7.2s | 694K rows/s | 25.0x |
 
 See `benchmark/` for scripts to reproduce these results.
 
