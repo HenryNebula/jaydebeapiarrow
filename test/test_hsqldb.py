@@ -65,7 +65,7 @@ class HsqldbMultipleConnectionsTest(unittest.TestCase):
 
 
 class HsqldbArrayTypeTest(unittest.TestCase):
-    """Test ARRAY type support — reading (VARCHAR fallback) and writing (list binding)."""
+    """Test ARRAY type support — reading and writing with multiple element types."""
 
     def setUp(self):
         self.conn = jaydebeapiarrow.connect(
@@ -74,28 +74,79 @@ class HsqldbArrayTypeTest(unittest.TestCase):
             experimental={'jvm_args': _SUPPRESS_LOGGING_ARGS})
         with self.conn.cursor() as cursor:
             cursor.execute(
-                "CREATE TABLE test_arrays (id INT, tags VARCHAR(100) ARRAY)")
+                "CREATE TABLE test_arrays ("
+                "  id INT, "
+                "  int_vals INT ARRAY, "
+                "  str_vals VARCHAR(100) ARRAY, "
+                "  bool_vals BOOLEAN ARRAY, "
+                "  float_vals DOUBLE ARRAY)")
             cursor.execute(
-                "INSERT INTO test_arrays VALUES (1, ARRAY['foo', 'bar', 'baz'])")
+                "INSERT INTO test_arrays VALUES ("
+                "  1, "
+                "  ARRAY[10, 20, 30], "
+                "  ARRAY['foo', 'bar', 'baz'], "
+                "  ARRAY[TRUE, FALSE, TRUE], "
+                "  ARRAY[1.5, 2.5, 3.5])")
 
     def tearDown(self):
         with self.conn.cursor() as cursor:
             cursor.execute("DROP TABLE test_arrays IF EXISTS")
         self.conn.close()
 
-    def test_array_column_read_as_varchar_string(self):
-        """ARRAY column currently returns as VARCHAR string (pyarrow.jvm List limitation)."""
+    def test_read_integer_array(self):
         with self.conn.cursor() as cursor:
-            cursor.execute("SELECT tags FROM test_arrays WHERE id = 1")
+            cursor.execute("SELECT int_vals FROM test_arrays WHERE id = 1")
             result = cursor.fetchone()
-        self.assertIsInstance(result[0], str)
+        self.assertIsInstance(result[0], list)
+        self.assertEqual(result[0], [10, 20, 30])
 
-    def test_array_parameter_binding(self):
-        """Python list parameters should be bindable as SQL ARRAYs."""
+    def test_read_varchar_array(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT str_vals FROM test_arrays WHERE id = 1")
+            result = cursor.fetchone()
+        self.assertIsInstance(result[0], list)
+        self.assertEqual(result[0], ["foo", "bar", "baz"])
+
+    def test_read_boolean_array(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT bool_vals FROM test_arrays WHERE id = 1")
+            result = cursor.fetchone()
+        self.assertIsInstance(result[0], list)
+        self.assertEqual(result[0], [True, False, True])
+
+    def test_read_float_array(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT float_vals FROM test_arrays WHERE id = 1")
+            result = cursor.fetchone()
+        self.assertIsInstance(result[0], list)
+        self.assertEqual(result[0], [1.5, 2.5, 3.5])
+
+    def test_bind_string_list(self):
         with self.conn.cursor() as cursor:
             cursor.execute(
-                "INSERT INTO test_arrays (id, tags) VALUES (?, ?)",
-                (4, ["one", "two"]))
-            cursor.execute("SELECT tags FROM test_arrays WHERE id = 4")
+                "INSERT INTO test_arrays (id, str_vals) VALUES (?, ?)",
+                (2, ["one", "two"]))
+            cursor.execute("SELECT str_vals FROM test_arrays WHERE id = 2")
             result = cursor.fetchone()
-        self.assertIsInstance(result[0], str)
+        self.assertIsInstance(result[0], list)
+        self.assertEqual(result[0], ["one", "two"])
+
+    def test_bind_int_list(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO test_arrays (id, int_vals) VALUES (?, ?)",
+                (3, [100, 200]))
+            cursor.execute("SELECT int_vals FROM test_arrays WHERE id = 3")
+            result = cursor.fetchone()
+        self.assertIsInstance(result[0], list)
+        self.assertEqual(result[0], [100, 200])
+
+    def test_read_multiple_array_columns(self):
+        """Multiple ARRAY columns in a single row."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT int_vals, str_vals FROM test_arrays WHERE id = 1")
+            result = cursor.fetchone()
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], [10, 20, 30])
+        self.assertEqual(result[1], ["foo", "bar", "baz"])

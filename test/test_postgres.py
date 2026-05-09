@@ -203,21 +203,70 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
                 cursor.execute("DROP TABLE test_xml_type")
 
     def test_array_column_read(self):
-        """Verify ARRAY columns are readable as strings via ExplicitTypeMapper VARCHAR fallback."""
+        """Verify ARRAY columns are readable as native Python lists via C Data Interface."""
         with self.conn.cursor() as cursor:
-            cursor.execute("CREATE TABLE test_array_type (id INT, data INTEGER[])")
+            cursor.execute(
+                "CREATE TABLE test_array_type ("
+                "  id INT, "
+                "  int_vals INTEGER[], "
+                "  str_vals TEXT[], "
+                "  bool_vals BOOLEAN[], "
+                "  float_vals DOUBLE PRECISION[])")
             try:
                 cursor.execute(
-                    "INSERT INTO test_array_type (id, data) VALUES (1, '{1,2,3}')"
-                )
-                cursor.execute("SELECT data FROM test_array_type WHERE id = 1")
+                    "INSERT INTO test_array_type VALUES ("
+                    "  1, "
+                    "  ARRAY[1, 2, 3], "
+                    "  ARRAY['foo', 'bar'], "
+                    "  ARRAY[TRUE, FALSE], "
+                    "  ARRAY[1.5, 2.5])")
+
+                # Integer array
+                cursor.execute("SELECT int_vals FROM test_array_type WHERE id = 1")
                 result = cursor.fetchone()
-                # Verify data is readable (degraded VARCHAR fallback — toString representation)
-                self.assertIsInstance(result[0], str)
-                # Verify cursor.description reports ARRAY type code
+                self.assertIsInstance(result[0], list)
+                self.assertEqual(result[0], [1, 2, 3])
                 self.assertIs(cursor.description[0][1], jaydebeapiarrow.ARRAY)
+
+                # Text array
+                cursor.execute("SELECT str_vals FROM test_array_type WHERE id = 1")
+                result = cursor.fetchone()
+                self.assertIsInstance(result[0], list)
+                self.assertEqual(result[0], ["foo", "bar"])
+
+                # Boolean array
+                cursor.execute("SELECT bool_vals FROM test_array_type WHERE id = 1")
+                result = cursor.fetchone()
+                self.assertIsInstance(result[0], list)
+                self.assertEqual(result[0], [True, False])
+
+                # Float array
+                cursor.execute("SELECT float_vals FROM test_array_type WHERE id = 1")
+                result = cursor.fetchone()
+                self.assertIsInstance(result[0], list)
+                self.assertEqual(result[0], [1.5, 2.5])
+
+                # Multiple array columns in one row
+                cursor.execute("SELECT int_vals, str_vals FROM test_array_type WHERE id = 1")
+                result = cursor.fetchone()
+                self.assertEqual(result[0], [1, 2, 3])
+                self.assertEqual(result[1], ["foo", "bar"])
             finally:
                 cursor.execute("DROP TABLE test_array_type")
+
+    def test_array_parameter_binding(self):
+        """Python list parameters should be bindable as SQL ARRAYs."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE test_array_bind (id INT, data INTEGER[])")
+            try:
+                cursor.execute(
+                    "INSERT INTO test_array_bind (id, data) VALUES (?, ?)",
+                    (1, [10, 20, 30]))
+                cursor.execute("SELECT data FROM test_array_bind WHERE id = 1")
+                result = cursor.fetchone()
+                self.assertEqual(result[0], [10, 20, 30])
+            finally:
+                cursor.execute("DROP TABLE test_array_bind")
 
     def test_execute_timestamptz_roundtrip_param_binding(self):
         """Test writing a TZ-aware datetime via parameter binding and reading back."""
