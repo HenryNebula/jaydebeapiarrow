@@ -2,7 +2,6 @@ import time
 import os
 import sys
 import jpype
-import pandas as pd
 import jaydebeapi
 import jaydebeapiarrow
 import pyarrow as pa

@@ -45,6 +45,7 @@ Homepage = "https://github.com/HenryNebula/jaydebeapiarrow"
 dev = [
     "coverage>=4.5",
     "jaydebeapi>=1.2.3",
+    "psycopg2-binary>=2.9.12",
     "pytest>=8.4.2",
     "pytest-xdist>=3.8.0",
     "unittest-xml-reporting",
