@@ -133,3 +133,6 @@ class TrinoTest(IntegrationTestBase, unittest.TestCase):
 
     def test_rollback_with_autocommit_enabled(self):
         self.skipTest("Trino memory connector does not support transactions")
+
+    def test_lastrowid_populated_for_identity_column(self):
+        self.skipTest("Trino does not support identity/auto-increment columns")

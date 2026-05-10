@@ -64,6 +64,9 @@ class SqlitePyTest(SqliteTestBase, unittest.TestCase):
     def test_rollback_with_autocommit_disabled(self):
         self.skipTest("pysqlite uses isolation_level, not JDBC setAutoCommit")
 
+    def test_sql_exception_message_is_clean(self):
+        self.skipTest("pysqlite raises sqlite3.OperationalError, not JDBC-wrapped DatabaseError")
+
     def test_lastrowid_none_after_select(self):
         self.skipTest("pysqlite returns actual rowid values, not None")
 
@@ -121,6 +124,14 @@ class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
     def test_timestamp_microsecond_precision(self):
         """SQLite Xerial JDBC truncates microseconds via date_string_format."""
         self.skipTest("SQLite Xerial JDBC truncates microsecond precision")
+
+    def test_lastrowid_none_after_insert(self):
+        """SQLite has implicit ROWID, so getGeneratedKeys returns the rowid."""
+        stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE) " \
+               "values (?, ?, ?)"
+        with self.conn.cursor() as cursor:
+            cursor.execute(stmt, (self.dbapi.Timestamp(2009, 9, 11, 14, 15, 22, 123450), 99, 1.0))
+            self.assertIsNotNone(cursor.lastrowid)
 
     def test_execute_and_fetch_parameter(self):
         with self.conn.cursor() as cursor:

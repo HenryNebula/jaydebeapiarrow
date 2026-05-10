@@ -650,7 +650,7 @@ class Connection(object):
 
     def close(self):
         if self._closed:
-            raise Error()
+            return
         self.jconn.close()
         self._closed = True
 
@@ -691,6 +691,7 @@ class Cursor(object):
         self._connection = connection
         self._buffer = []
         self._prep = None
+        self.rowcount = -1
         self.lastrowid = None
 
     @property
@@ -891,9 +892,12 @@ class Cursor(object):
         self._close_last()
         self.lastrowid = None
         try:
-            self._prep = self._connection.jconn.prepareStatement(operation)
-        except:
-            _handle_sql_exception()
+            self._prep = self._connection.jconn.prepareStatement(operation, 1)
+        except Exception:
+            try:
+                self._prep = self._connection.jconn.prepareStatement(operation)
+            except:
+                _handle_sql_exception()
         self._set_stmt_parms(self._prep, parameters, is_batch=False)
         try:
             is_rs = self._prep.execute()
@@ -905,15 +909,26 @@ class Cursor(object):
             self.rowcount = -1
         else:
             self.rowcount = self._prep.getUpdateCount()
+            try:
+                gk_rs = self._prep.getGeneratedKeys()
+                if gk_rs.next():
+                    self.lastrowid = int(gk_rs.getLong(1))
+                    if gk_rs.wasNull():
+                        self.lastrowid = None
+            except Exception:
+                pass
         # self._prep.getWarnings() ???
 
     def executemany(self, operation, seq_of_parameters):
         self._close_last()
         self.lastrowid = None
         try:
-            self._prep = self._connection.jconn.prepareStatement(operation)
-        except:
-            _handle_sql_exception()
+            self._prep = self._connection.jconn.prepareStatement(operation, 1)
+        except Exception:
+            try:
+                self._prep = self._connection.jconn.prepareStatement(operation)
+            except:
+                _handle_sql_exception()
         self._set_stmt_parms(self._prep, seq_of_parameters, is_batch=True)
         try:
             update_counts = self._prep.executeBatch()

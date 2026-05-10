@@ -1236,7 +1236,7 @@ class MockTest(unittest.TestCase):
             self.assertIsNone(cursor.lastrowid)
 
     def test_lastrowid_none_after_insert(self):
-        """lastrowid should be None after INSERT (JDBC doesn't expose rowid)."""
+        """lastrowid is None after INSERT with no auto-generated keys (mock has no identity column)."""
         self.conn.jconn.mockBigDecimalResult(1, 0)
         with self.conn.cursor() as cursor:
             cursor.execute("dummy stmt")

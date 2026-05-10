@@ -134,5 +134,8 @@ class OracleTest(IntegrationTestBase, unittest.TestCase):
     def test_long_query_string_18k_characters(self):
         self.skipTest("Oracle has a 1000-element limit on IN clauses")
 
+    def test_lastrowid_populated_for_identity_column(self):
+        self.skipTest("Oracle JDBC returns ROWID instead of identity value via getGeneratedKeys")
+
     def test_varchar_columns_return_data(self):
         self.skipTest("Oracle requires TO_TIMESTAMP for date string literals")

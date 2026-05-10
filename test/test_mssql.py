@@ -58,6 +58,11 @@ class MSSQLTest(IntegrationTestBase, unittest.TestCase):
     def _double_create_sql(self):
         return "CREATE TABLE DOUBLE_TEST (val FLOAT)"
 
+    def _autoincrement_create_sql(self):
+        return ("CREATE TABLE LASTROWID_TEST "
+                "(id INT IDENTITY(1,1) PRIMARY KEY, "
+                "val VARCHAR(50))")
+
     def test_blob_null_value(self):
         """MSSQL JDBC driver rejects NULL parameter binding for VARBINARY columns."""
         self.skipTest("MSSQL JDBC driver does not support NULL for VARBINARY parameter binding")

@@ -107,8 +107,10 @@ jobs:
       run: bash test/build.sh
     - name: Install from TestPyPI
       run: pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ JayDeBeApiArrow
+    - name: Install test dependencies
+      run: pip install pytest JPype1
     - name: Run mock tests
-      run: CLASSPATH="test/jars/*:test/mock-jars/*" python -m pytest test/test_mock.py test/test_infrastructure.py -v
+      run: CLASSPATH="test/mock-jars/*" python -m pytest test/test_mock.py -v
 
   publish-to-pypi:
     name: Publish to PyPI

@@ -393,3 +393,6 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
 
     def test_description_returns_column_alias(self):
         self.skipTest("Drill does not support quoted identifiers")
+
+    def test_lastrowid_populated_for_identity_column(self):
+        self.skipTest("Drill does not support identity/auto-increment columns")

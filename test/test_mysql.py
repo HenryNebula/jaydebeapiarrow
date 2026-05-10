@@ -39,3 +39,8 @@ class MySQLTest(IntegrationTestBase, unittest.TestCase):
     def setUpSql(self):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'create_mysql.sql'))
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert.sql'))
+
+    def _autoincrement_create_sql(self):
+        return ("CREATE TABLE LASTROWID_TEST "
+                "(id INT AUTO_INCREMENT PRIMARY KEY, "
+                "val VARCHAR(50))")
