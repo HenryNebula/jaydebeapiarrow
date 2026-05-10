@@ -65,7 +65,7 @@ with conn.cursor() as curs:
 | `fetchall()` / `fetchone()` / `fetchmany()` | `tuple` / `list[tuple]` | ~6.8x | Drop-in replacement, DB-API compatibility |
 | `fetch_arrow_batches()` | `Iterator[pyarrow.RecordBatch]` | ~23.7x | Streaming large results |
 | `fetch_arrow_table()` | `pyarrow.Table` | ~23.7x | All data at once |
-| `fetch_df()` | `pandas.DataFrame` | ~23.7x | Quick path to pandas |
+| `fetch_df()` | `pandas.DataFrame` | ~23.7x | Quick path to pandas (requires `pip install jaydebeapiarrow[pandas]`) |
 
 The performance gap between Drop-in and Native grows with column count, because the tuple conversion cost scales linearly with the number of cells. See [Benchmarks](benchmarks.md) for details.
 
@@ -159,10 +159,21 @@ for batch in curs.fetch_arrow_batches():
 table = curs.fetch_arrow_table()
 # table is a pyarrow.Table
 
-# Direct to pandas DataFrame
+# Direct to pandas DataFrame (requires pandas: pip install jaydebeapiarrow[pandas])
 df = curs.fetch_df()
 # df is a pandas.DataFrame
 ```
+
+## Cursor Attributes
+
+| Attribute | Description |
+|---|---|
+| `rowcount` | Number of rows produced/affected by the last `execute*()`. `-1` if no execute has been performed or the count cannot be determined (e.g. SELECT queries). |
+| `lastrowid` | The auto-generated key from the last `INSERT` on a table with an identity/auto-increment column. `None` if no key was generated or the table has no identity column. Uses JDBC `getGeneratedKeys()`. |
+| `description` | Column metadata for the last query. `None` before execution. |
+
+!!! note "Oracle limitation"
+    Oracle JDBC returns ROWID instead of the numeric identity value via `getGeneratedKeys()`. For Oracle, `lastrowid` will always be `None`. Use `RETURNING INTO` for Oracle-specific identity retrieval.
 
 ## Parameter Binding
 

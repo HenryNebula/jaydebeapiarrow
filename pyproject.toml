@@ -41,6 +41,9 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/HenryNebula/jaydebeapiarrow"
 
+[project.optional-dependencies]
+pandas = ["pandas"]
+
 [dependency-groups]
 dev = [
     "coverage>=4.5",

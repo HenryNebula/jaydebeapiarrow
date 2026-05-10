@@ -1103,6 +1103,13 @@ class Cursor(object):
         Returns:
             pandas.DataFrame: Query result as a pandas DataFrame
         """
+        try:
+            import pandas  # noqa: F401
+        except ImportError:
+            raise ImportError(
+                "fetch_df() requires pandas. "
+                "Install it with: pip install jaydebeapiarrow[pandas]"
+            )
         return self.fetch_arrow_table().to_pandas()
 
     def __enter__(self):
