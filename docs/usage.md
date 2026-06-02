@@ -8,6 +8,26 @@ pip install JayDeBeApiArrow
 
 Requires Python 3.9+ and a JDK (8+). JPype and PyArrow are installed automatically as dependencies.
 
+### Optional extras
+
+```bash
+pip install "JayDeBeApiArrow[pandas]"   # pandas DataFrame support
+```
+
+Or with uv:
+
+```bash
+uv add "JayDeBeApiArrow[pandas]"
+```
+
+### Development
+
+```bash
+git clone https://github.com/HenryNebula/jaydebeapiArrow.git
+cd jaydebeapiArrow
+uv sync --group dev
+```
+
 ## Drop-In Replacement
 
 JayDeBeApiArrow is a **drop-in replacement** for the original [jaydebeapi](https://github.com/baztian/jaydebeapi). If your code uses jaydebeapi today, simply change the import:

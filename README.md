@@ -27,13 +27,19 @@ You can get and install JayDeBeApiArrow with pip:
 pip install JayDeBeApiArrow
 ```
 
-Or you can get a copy of the source by cloning from the [JayDeBeApiArrow github project](https://github.com/HenryNebula/jaydebeapiArrow) and install with:
+Or with uv:
 
 ```bash
-uv sync
+uv add JayDeBeApiArrow
 ```
 
-Ensure that you have installed [JPype](https://pypi.python.org/pypi/JPype1/) properly (it will be installed automatically by `uv sync`).
+Or install from source:
+
+```bash
+git clone https://github.com/HenryNebula/jaydebeapiArrow.git
+cd jaydebeapiArrow
+pip install -e .
+```
 
 ## Usage
 

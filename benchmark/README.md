@@ -55,8 +55,7 @@ Install required packages:
 
 ```bash
 # From project root
-pip install -r dev-requirements.txt
-pip install psycopg2 pandas
+uv sync --group dev
 ```
 
 Key dependencies:

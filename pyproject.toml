@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "JayDeBeApiArrow"
-version = "2.1.4rc0"
+version = "2.1.5"
 description = "Use JDBC database drivers from Python 3 with a DB-API, accelerated with Apache Arrow."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -33,9 +33,7 @@ classifiers = [
 dependencies = [
     "JPype1>=1.0.0",
     "pyarrow>=16.0.0",
-    "numpy",
     "cffi",
-    "bump-my-version",
 ]
 
 [project.urls]
@@ -46,6 +44,7 @@ pandas = ["pandas"]
 
 [dependency-groups]
 dev = [
+    "bump-my-version",
     "coverage>=4.5",
     "jaydebeapi>=1.2.3",
     "mkdocs>=1.6",
@@ -57,7 +56,7 @@ dev = [
 ]
 
 [tool.bumpversion]
-current_version = "2.1.4rc0"
+current_version = "2.1.5"
 commit = true
 tag = true
 parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)(?:(?P<release>[a-zA-Z]+)(?P<build>\\d+))?"
