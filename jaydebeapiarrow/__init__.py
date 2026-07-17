@@ -455,6 +455,8 @@ class DBAPITypeObject(object):
         except (KeyError, TypeError):
             return False
         return name in self.values
+    def __hash__(self):
+        return hash(self.group_name)
     def __ne__(self, other):
         return not self.__eq__(other)
     def __repr__(self):

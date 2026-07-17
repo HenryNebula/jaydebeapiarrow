@@ -72,6 +72,11 @@ class MockTest(unittest.TestCase):
                         cursor.execute("dummy stmt")
                         cursor.fetchone()
 
+    def test_db_api_type_objects_hashable(self):
+        for db_api_type in jaydebeapiarrow.__dict__.values():
+            if isinstance(db_api_type, jaydebeapiarrow.DBAPITypeObject):
+                self.assertIsNotNone(hash(db_api_type))
+
     def test_ancient_date_mapped(self):
         date = datetime(year=70, month=1, day=1).date()
         self.conn.jconn.mockDateResult(date.year, date.month, date.day)
