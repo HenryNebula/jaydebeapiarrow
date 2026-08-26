@@ -138,13 +138,12 @@ public abstract class MockConnection implements Connection {
     Mockito.when(mockResultSet.next()).thenReturn(true);
     ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
     mockGeneralResultSetMetaData(mockMetaData, Types.DECIMAL);
-    mockMetaData.getPrecision(10);
-    mockMetaData.getScale(5);
     Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
 
     BigDecimal columnValue = BigDecimal.valueOf(value, scale);
     Mockito.when(mockResultSet.getObject(1)).thenReturn(columnValue);
     Mockito.when(mockResultSet.getBigDecimal(1)).thenReturn(columnValue);
+    Mockito.when(mockResultSet.getString(1)).thenReturn(columnValue.toString());
     stubPrepareStatement(mockPreparedStatement);
   }
 
@@ -178,6 +177,7 @@ public abstract class MockConnection implements Connection {
     Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
 
     Mockito.when(mockResultSet.getObject(1)).thenReturn(value);
+    Mockito.when(mockResultSet.getString(1)).thenReturn(value.toString());
     Mockito.when(mockResultSet.wasNull()).thenReturn(false);
     stubPrepareStatement(mockPreparedStatement);
   }
@@ -233,6 +233,7 @@ public abstract class MockConnection implements Connection {
     Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
 
     Mockito.when(mockResultSet.getObject(1)).thenReturn(value);
+    Mockito.when(mockResultSet.getString(1)).thenReturn(value.toString());
     Mockito.when(mockResultSet.wasNull()).thenReturn(false);
     stubPrepareStatement(mockPreparedStatement);
   }
@@ -245,13 +246,12 @@ public abstract class MockConnection implements Connection {
     Mockito.when(mockResultSet.next()).thenReturn(true);
     ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
     mockGeneralResultSetMetaData(mockMetaData, Types.DECIMAL);
-    mockMetaData.getPrecision(10);
-    mockMetaData.getScale(5);
     Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
 
     Double columnValue = Double.valueOf(value);
     Mockito.when(mockResultSet.getObject(1)).thenReturn(value);
     Mockito.when(mockResultSet.getBigDecimal(1)).thenReturn(BigDecimal.valueOf(value));
+    Mockito.when(mockResultSet.getString(1)).thenReturn(BigDecimal.valueOf(value).toString());
     stubPrepareStatement(mockPreparedStatement);
   }
 
@@ -354,6 +354,7 @@ public abstract class MockConnection implements Connection {
       case Types.NUMERIC:
         object = BigDecimal.valueOf(0.0);
         Mockito.when(mockResultSet.getBigDecimal(1)).thenReturn((BigDecimal) object);
+        Mockito.when(mockResultSet.getString(1)).thenReturn(object.toString());
         break;
       case Types.DATE:
         LocalDate localDate = LocalDate.parse("2000-01-01");

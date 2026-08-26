@@ -51,12 +51,14 @@ public class OverriddenConsumer {
                 int scale = fieldInfo.getScale();
                 if (precision <= 0) precision = 38;
                 if (scale < 0) scale = 0;
+                // No Arrow decimal type holds more than 76 digits. Columns
+                // declared beyond that are transferred as UTF-8 strings;
+                // the Python side rebuilds exact Decimals from them.
+                if (precision > DecimalConsumer.DECIMAL256_MAX_PRECISION) {
+                    return new ArrowType.Utf8();
+                }
                 // Mirror upstream arrow-jdbc: precision beyond decimal128's
-                // 38 digits maps to decimal256. No Arrow decimal type holds
-                // more than 76 digits, so cap the declared precision/scale
-                // there; larger values then fail in the consumer with an
-                // actionable error instead of a raw UnsupportedOperationException
-                // from DecimalUtility.
+                // 38 digits maps to decimal256.
                 if (precision > 38) {
                     return new ArrowType.Decimal(
                             Math.min(precision, DecimalConsumer.DECIMAL256_MAX_PRECISION),

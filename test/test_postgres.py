@@ -147,6 +147,18 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
         self.assertEqual(result[1], datetime(2024, 1, 14, 23, 30, 0, tzinfo=timezone.utc))
         self.assertIsNotNone(result[1].tzinfo)
 
+    def test_unbounded_numeric_exact_scale(self):
+        """Untyped NUMERIC (JDBC precision 0) must return the exact value.
+        Previously these columns were mapped to DECIMAL(38, 17), silently
+        rounding away fractional digits beyond 17 (issue #119 follow-up)."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT 0.123456789012345678901234567890::numeric")
+            result = cursor.fetchone()
+        self.assertIsInstance(result[0], Decimal)
+        self.assertEqual(
+            result[0], Decimal("0.123456789012345678901234567890"))
+
     def test_json_column_read(self):
         """Verify JSON columns (JDBC OTHER) are readable as strings via ExplicitTypeMapper."""
         with self.conn.cursor() as cursor:

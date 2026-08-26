@@ -222,24 +222,35 @@ class MockTest(unittest.TestCase):
             result = cursor.fetchone()
         self.assertEqual(result[0], Decimal("123.4567"))
 
-    def test_numeric_precision_beyond_decimal256_actionable_error(self):
-        """Values needing more than 76 digits cannot be represented by any
-        Arrow decimal type; they should fail with the actionable CAST error
-        instead of a raw UnsupportedOperationException (issue #119)."""
+    def test_numeric_precision_beyond_decimal256_returns_exact_decimal(self):
+        """Columns declared beyond decimal256's 76-digit capacity (e.g.
+        NUMERIC(1000, 0)) are transferred as strings and rebuilt into exact
+        Decimals on the Python side (issue #119)."""
         import jpype
         BigDecimal = jpype.JClass("java.math.BigDecimal")
         value = BigDecimal("1" + "0" * 79)  # 80 digits, scale 0
         self.conn.jconn.mockHighPrecisionDecimalResult(value, 1000, 0)
         with self.conn.cursor() as cursor:
             cursor.execute("dummy stmt")
-            with self.assertRaises(Exception) as cm:
-                cursor.fetchone()
+            result = cursor.fetchone()
 
-        message = str(cm.exception)
-        self.assertIn("Could not convert DECIMAL/NUMERIC value", message)
-        self.assertIn("Arrow DECIMAL(76, 0)", message)
-        self.assertIn("CAST(column AS DECIMAL(76, 0))", message)
-        self.assertIn("cast it to VARCHAR", message)
+        self.assertIsInstance(result[0], Decimal)
+        self.assertEqual(result[0], Decimal("1" + "0" * 79))
+
+    def test_unbounded_decimal_returns_exact_decimal(self):
+        """Drivers reporting no precision (JDBC precision 0, e.g. Postgres
+        untyped NUMERIC) must round-trip exactly instead of being rounded to
+        the old DECIMAL(38, 17) default scale."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        value = BigDecimal("0.123456789012345678901234567890")  # 30 fractional digits
+        self.conn.jconn.mockHighPrecisionDecimalResult(value, 0, 0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+
+        self.assertIsInstance(result[0], Decimal)
+        self.assertEqual(result[0], Decimal("0.123456789012345678901234567890"))
 
     def test_decimal_integer_from_getObject(self):
         """Drivers like Oracle return BigDecimal with scale 0 for integer-like

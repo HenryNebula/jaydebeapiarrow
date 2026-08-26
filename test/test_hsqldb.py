@@ -100,6 +100,18 @@ class HsqldbHighPrecisionNumericTest(unittest.TestCase):
             result = cursor.fetchone()
         self.assertEqual(result[0], Decimal("123.4567"))
 
+    def test_numeric_1000_80_digit_value(self):
+        """An 80-digit value in NUMERIC(1000, 0) exceeds decimal256's 76-digit
+        capacity; it should still round-trip exactly via the string path."""
+        literal = "1" + "0" * 79
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE t_hp3 (val NUMERIC(1000, 0))")
+            cursor.execute(f"INSERT INTO t_hp3 VALUES ({literal})")
+            cursor.execute("SELECT val FROM t_hp3")
+            result = cursor.fetchone()
+        self.assertIsInstance(result[0], Decimal)
+        self.assertEqual(result[0], Decimal(literal))
+
 
 class HsqldbArrayTypeTest(unittest.TestCase):
     """Test ARRAY type support — reading and writing with multiple element types."""

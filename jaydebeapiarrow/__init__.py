@@ -682,12 +682,29 @@ class Connection(object):
         self.close()
 
 # DB-API 2.0 Cursor Object
+def _decimal_string_column_indexes(meta):
+    """Return 0-based indexes of DECIMAL/NUMERIC columns in a JDBC
+    ResultSetMetaData. The Java layer transfers such columns as UTF-8 when
+    their values cannot fit an Arrow decimal vector (> 76 digits) or when the
+    driver reports no precision (unbounded numerics, e.g. Postgres NUMERIC);
+    the cursor rebuilds exact Decimals from those strings."""
+    import jpype
+    types = jpype.java.sql.Types
+    decimal_consts = (types.DECIMAL, types.NUMERIC)
+    indexes = []
+    for col in range(1, meta.getColumnCount() + 1):
+        if int(meta.getColumnType(col)) in decimal_consts:
+            indexes.append(col - 1)
+    return tuple(indexes)
+
+
 class Cursor(object):
 
     _rs = None
     _description = None
     _iter = None
     _buffer = None
+    _decimal_cols = None
 
     def __init__(self, connection):
         self._connection = connection
@@ -752,6 +769,7 @@ class Cursor(object):
         self._prep = None
         self._meta = None
         self._description = None
+        self._decimal_cols = None
 
     # def _set_stmt_parms(self, prep_stmt, parameters):
     #     for i in range(len(parameters)):
@@ -953,6 +971,28 @@ class Cursor(object):
         self._iter = convert_jdbc_rs_to_arrow_iterator(self._rs, batch_size=batch_size)
         return self._iter
 
+    def _restore_decimal_columns(self, rows):
+        """Rebuild Decimal objects for DECIMAL/NUMERIC columns transferred as
+        UTF-8 strings (values beyond decimal256's 76-digit capacity, or
+        unbounded numeric columns where JDBC reports no precision). Columns
+        that stayed Arrow decimals already hold Decimal objects and are
+        skipped by the isinstance check."""
+        if not rows:
+            return rows
+        if self._decimal_cols is None:
+            self._decimal_cols = (_decimal_string_column_indexes(self._meta)
+                                   if self._meta is not None else ())
+        if not self._decimal_cols:
+            return rows
+        restored = []
+        for row in rows:
+            row = list(row)
+            for i in self._decimal_cols:
+                if i < len(row) and isinstance(row[i], str):
+                    row[i] = Decimal(row[i])
+            restored.append(tuple(row))
+        return restored
+
     def fetchone(self):
         if not self._rs:
             return None
@@ -961,7 +1001,7 @@ class Cursor(object):
             return self._buffer.pop(0)
 
         it = self._get_iter()
-        rows = fetch_next_batch(it)
+        rows = self._restore_decimal_columns(fetch_next_batch(it))
         if rows:
             self._buffer.extend(rows)
             return self._buffer.pop(0)
@@ -988,7 +1028,7 @@ class Cursor(object):
                 result.extend(take)
             else:
                 it = self._get_iter()
-                rows = fetch_next_batch(it)
+                rows = self._restore_decimal_columns(fetch_next_batch(it))
                 if not rows:
                     # Iterator exhausted and closed by fetch_next_batch
                     self._iter = None
@@ -1011,7 +1051,7 @@ class Cursor(object):
         # We can implement a more efficient fetchall if we want to avoid python loops for buffering,
         # but reusing fetch_next_batch is simpler.
         while True:
-            rows = fetch_next_batch(it)
+            rows = self._restore_decimal_columns(fetch_next_batch(it))
             if not rows:
                 break
             result.extend(rows)
