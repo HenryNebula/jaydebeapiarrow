@@ -51,6 +51,18 @@ public class OverriddenConsumer {
                 int scale = fieldInfo.getScale();
                 if (precision <= 0) precision = 38;
                 if (scale < 0) scale = 0;
+                // Mirror upstream arrow-jdbc: precision beyond decimal128's
+                // 38 digits maps to decimal256. No Arrow decimal type holds
+                // more than 76 digits, so cap the declared precision/scale
+                // there; larger values then fail in the consumer with an
+                // actionable error instead of a raw UnsupportedOperationException
+                // from DecimalUtility.
+                if (precision > 38) {
+                    return new ArrowType.Decimal(
+                            Math.min(precision, DecimalConsumer.DECIMAL256_MAX_PRECISION),
+                            Math.min(scale, DecimalConsumer.DECIMAL256_MAX_PRECISION),
+                            256);
+                }
                 return new ArrowType.Decimal(precision, scale, 128);
             default:
                 return JdbcToArrowUtils.getArrowTypeFromJdbcType(fieldInfo, null);
@@ -86,7 +98,7 @@ public class OverriddenConsumer {
             case Decimal:
                 ArrowType.Decimal decimalType = (ArrowType.Decimal) arrowType;
                 return DecimalConsumer.createConsumer(
-                        (DecimalVector) vector, columnIndex, nullable,
+                        vector, columnIndex, nullable,
                         config.getBigDecimalRoundingMode() != null
                                 ? config.getBigDecimalRoundingMode()
                                 : RoundingMode.HALF_UP,

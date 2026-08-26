@@ -195,6 +195,52 @@ class MockTest(unittest.TestCase):
 
         self.assertEqual(result[0], Decimal("123456789012345678901234567890123456.79"))
 
+    def test_decimal_precision_above_38_uses_decimal256(self):
+        """DECIMAL/NUMERIC precision in the 39-76 range must not crash with
+        'Decimal size greater than 16 bytes' — upstream arrow-jdbc maps these
+        columns to decimal256, and so must we (issue #119)."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        value = BigDecimal("12345678901234567890.123456789012345678901234567890")
+        self.conn.jconn.mockHighPrecisionDecimalResult(value, 50, 30)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(
+            result[0], Decimal("12345678901234567890.123456789012345678901234567890"))
+
+    def test_numeric_1000_scale_64_small_value_round_trips(self):
+        """Issue #119: NUMERIC(1000, 64) columns crashed with
+        UnsupportedOperationException 'Decimal size greater than 16 bytes'.
+        Small values fit decimal256, so they should round-trip exactly."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        value = BigDecimal("123.4567")
+        self.conn.jconn.mockHighPrecisionDecimalResult(value, 1000, 64)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("123.4567"))
+
+    def test_numeric_precision_beyond_decimal256_actionable_error(self):
+        """Values needing more than 76 digits cannot be represented by any
+        Arrow decimal type; they should fail with the actionable CAST error
+        instead of a raw UnsupportedOperationException (issue #119)."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        value = BigDecimal("1" + "0" * 79)  # 80 digits, scale 0
+        self.conn.jconn.mockHighPrecisionDecimalResult(value, 1000, 0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            with self.assertRaises(Exception) as cm:
+                cursor.fetchone()
+
+        message = str(cm.exception)
+        self.assertIn("Could not convert DECIMAL/NUMERIC value", message)
+        self.assertIn("Arrow DECIMAL(76, 0)", message)
+        self.assertIn("CAST(column AS DECIMAL(76, 0))", message)
+        self.assertIn("cast it to VARCHAR", message)
+
     def test_decimal_integer_from_getObject(self):
         """Drivers like Oracle return BigDecimal with scale 0 for integer-like
         NUMERIC columns (e.g., NUMBER(10)). The vector now preserves the

@@ -1,6 +1,6 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.
  * The ASF licenses this file to You under the Apache License, Version 2.0
  * (the "License"); you may not use this file except in compliance with
@@ -23,7 +23,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 
 import org.apache.arrow.adapter.jdbc.consumer.JdbcConsumer;
+import org.apache.arrow.vector.Decimal256Vector;
 import org.apache.arrow.vector.DecimalVector;
+import org.apache.arrow.vector.FieldVector;
 
 /**
  * Custom DecimalConsumer that handles JDBC drivers (like SQLite) which return
@@ -36,34 +38,49 @@ import org.apache.arrow.vector.DecimalVector;
  *
  * This consumer normalizes values via BigDecimal.valueOf() to get a clean
  * decimal representation before setting the scale to match the vector.
+ *
+ * Supports both decimal128 (DecimalVector, up to 38 digits) and decimal256
+ * (Decimal256Vector, up to 76 digits) targets, mirroring how upstream
+ * arrow-jdbc maps DECIMAL/NUMERIC columns whose precision exceeds 38.
  */
 public class DecimalConsumer {
 
-    public static JdbcConsumer<DecimalVector> createConsumer(
-            DecimalVector vector, int index, boolean nullable, RoundingMode roundingMode) {
-        return createConsumer(vector, index, nullable, roundingMode, vector.getScale(), 38);
+    /** Maximum precision representable by a 16-byte decimal128 vector. */
+    public static final int DECIMAL128_MAX_PRECISION = 38;
+    /** Maximum precision representable by a 32-byte decimal256 vector. */
+    public static final int DECIMAL256_MAX_PRECISION = 76;
+
+    /** Writes a BigDecimal value into either a DecimalVector or Decimal256Vector. */
+    private interface DecimalWriter {
+        void set(int index, BigDecimal value);
     }
 
-    public static JdbcConsumer<DecimalVector> createConsumer(
-            DecimalVector vector, int index, boolean nullable, RoundingMode roundingMode, int scale, int precision) {
+    public static JdbcConsumer<FieldVector> createConsumer(
+            FieldVector vector, int index, boolean nullable, RoundingMode roundingMode,
+            int scale, int precision) {
+        DecimalWriter writer = writerFor(vector);
+        // Never validate against a precision the vector cannot actually hold,
+        // so oversized values fail below with an actionable error instead of a
+        // raw UnsupportedOperationException from DecimalUtility.
+        int effectivePrecision = Math.min(precision, maxPrecision(vector));
         if (nullable) {
-            return new NullableDecimalConsumer(vector, index, roundingMode, scale, precision);
+            return new NullableDecimalConsumer(writer, index, roundingMode, scale, effectivePrecision);
         } else {
-            return new NonNullableDecimalConsumer(vector, index, roundingMode, scale, precision);
+            return new NonNullableDecimalConsumer(writer, index, roundingMode, scale, effectivePrecision);
         }
     }
 
-    static class NullableDecimalConsumer implements JdbcConsumer<DecimalVector> {
+    static class NullableDecimalConsumer implements JdbcConsumer<FieldVector> {
 
         private final RoundingMode roundingMode;
         private final int scale;
         private final int precision;
         private final int columnIndexInResultSet;
-        private DecimalVector vector;
+        private DecimalWriter writer;
         private int currentIndex;
 
-        public NullableDecimalConsumer(DecimalVector vector, int index, RoundingMode roundingMode, int scale, int precision) {
-            this.vector = vector;
+        public NullableDecimalConsumer(DecimalWriter writer, int index, RoundingMode roundingMode, int scale, int precision) {
+            this.writer = writer;
             this.columnIndexInResultSet = index;
             this.roundingMode = roundingMode;
             this.scale = scale;
@@ -77,17 +94,17 @@ public class DecimalConsumer {
                 if (!resultSet.wasNull()) {
                     bd = bd.setScale(scale, roundingMode);
                     validateDecimalFitsVector(bd, precision);
-                    vector.set(currentIndex, bd);
+                    writer.set(currentIndex, bd);
                 }
-            } catch (ArithmeticException | IllegalArgumentException e) {
+            } catch (ArithmeticException | IllegalArgumentException | UnsupportedOperationException e) {
                 throw createDecimalConversionException(e, currentIndex, columnIndexInResultSet, precision, scale);
             }
             currentIndex++;
         }
 
         @Override
-        public void resetValueVector(DecimalVector vector) {
-            this.vector = vector;
+        public void resetValueVector(FieldVector vector) {
+            this.writer = writerFor(vector);
             this.currentIndex = 0;
         }
 
@@ -96,17 +113,17 @@ public class DecimalConsumer {
         }
     }
 
-    static class NonNullableDecimalConsumer implements JdbcConsumer<DecimalVector> {
+    static class NonNullableDecimalConsumer implements JdbcConsumer<FieldVector> {
 
         private final RoundingMode roundingMode;
         private final int scale;
         private final int precision;
         private final int columnIndexInResultSet;
-        private DecimalVector vector;
+        private DecimalWriter writer;
         private int currentIndex;
 
-        public NonNullableDecimalConsumer(DecimalVector vector, int index, RoundingMode roundingMode, int scale, int precision) {
-            this.vector = vector;
+        public NonNullableDecimalConsumer(DecimalWriter writer, int index, RoundingMode roundingMode, int scale, int precision) {
+            this.writer = writer;
             this.columnIndexInResultSet = index;
             this.roundingMode = roundingMode;
             this.scale = scale;
@@ -119,16 +136,16 @@ public class DecimalConsumer {
                 BigDecimal bd = getCleanBigDecimal(resultSet, columnIndexInResultSet);
                 bd = bd.setScale(scale, roundingMode);
                 validateDecimalFitsVector(bd, precision);
-                vector.set(currentIndex, bd);
-            } catch (ArithmeticException | IllegalArgumentException e) {
+                writer.set(currentIndex, bd);
+            } catch (ArithmeticException | IllegalArgumentException | UnsupportedOperationException e) {
                 throw createDecimalConversionException(e, currentIndex, columnIndexInResultSet, precision, scale);
             }
             currentIndex++;
         }
 
         @Override
-        public void resetValueVector(DecimalVector vector) {
-            this.vector = vector;
+        public void resetValueVector(FieldVector vector) {
+            this.writer = writerFor(vector);
             this.currentIndex = 0;
         }
 
@@ -137,15 +154,42 @@ public class DecimalConsumer {
         }
     }
 
+    private static DecimalWriter writerFor(FieldVector vector) {
+        if (vector instanceof Decimal256Vector) {
+            final Decimal256Vector decimal256Vector = (Decimal256Vector) vector;
+            return new DecimalWriter() {
+                @Override
+                public void set(int index, BigDecimal value) {
+                    decimal256Vector.set(index, value);
+                }
+            };
+        }
+        if (vector instanceof DecimalVector) {
+            final DecimalVector decimalVector = (DecimalVector) vector;
+            return new DecimalWriter() {
+                @Override
+                public void set(int index, BigDecimal value) {
+                    decimalVector.set(index, value);
+                }
+            };
+        }
+        throw new IllegalArgumentException(
+                "Unsupported decimal vector type: " + vector.getClass().getName());
+    }
+
+    private static int maxPrecision(FieldVector vector) {
+        return vector instanceof Decimal256Vector ? DECIMAL256_MAX_PRECISION : DECIMAL128_MAX_PRECISION;
+    }
+
     private static SQLException createDecimalConversionException(
             RuntimeException cause, int rowIndex, int columnIndex, int precision, int scale) {
         return new SQLException(String.format(
                 "Could not convert DECIMAL/NUMERIC value at row %d, column %d to Arrow DECIMAL(%d, %d). " +
                 "The value may exceed Arrow decimal precision or require a different scale. " +
                 "Cast the column in SQL to a supported DECIMAL/NUMERIC precision and scale, " +
-                "for example CAST(column AS DECIMAL(38, %d)), or cast it to VARCHAR to preserve the exact value as text. " +
+                "for example CAST(column AS DECIMAL(%d, %d)), or cast it to VARCHAR to preserve the exact value as text. " +
                 "Cause: %s",
-                rowIndex, columnIndex, precision, scale, scale,
+                rowIndex, columnIndex, precision, scale, precision, scale,
                 cause.getMessage()),
                 cause);
     }

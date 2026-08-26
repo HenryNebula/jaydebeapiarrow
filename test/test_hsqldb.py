@@ -3,6 +3,7 @@
 import jaydebeapiarrow
 import os
 import unittest
+from decimal import Decimal
 
 try:
     from test._base import IntegrationTestBase, _THIS_DIR, _SUPPRESS_LOGGING_ARGS
@@ -61,6 +62,43 @@ class HsqldbMultipleConnectionsTest(unittest.TestCase):
 
         for conn in connections:
             conn.close()
+
+
+class HsqldbHighPrecisionNumericTest(unittest.TestCase):
+    """High-precision NUMERIC columns must not crash the Arrow fetch path (issue #119)."""
+
+    def setUp(self):
+        self.conn = jaydebeapiarrow.connect(
+            'org.hsqldb.jdbcDriver', 'jdbc:hsqldb:mem:hpnumeric',
+            ['SA', ''],
+            jvm_args=_SUPPRESS_LOGGING_ARGS)
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_numeric_precision_50_scale_30(self):
+        """NUMERIC(50, 30) — decimal256 range. Supported by upstream
+        arrow-jdbc, but crashed with 'Decimal size greater than 16 bytes'
+        under our decimal128-only type mapping."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE t_hp1 (val NUMERIC(50, 30))")
+            cursor.execute(
+                "INSERT INTO t_hp1 VALUES "
+                "(12345678901234567890.123456789012345678901234567890)")
+            cursor.execute("SELECT val FROM t_hp1")
+            result = cursor.fetchone()
+        self.assertEqual(
+            result[0], Decimal("12345678901234567890.123456789012345678901234567890"))
+
+    def test_numeric_1000_64_issue_119(self):
+        """Exact scenario from issue #119: NUMERIC(1000, 64) crashed with
+        'Decimal size greater than 16 bytes: 28'."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE t_hp2 (val NUMERIC(1000, 64))")
+            cursor.execute("INSERT INTO t_hp2 VALUES (123.4567)")
+            cursor.execute("SELECT val FROM t_hp2")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("123.4567"))
 
 
 class HsqldbArrayTypeTest(unittest.TestCase):
