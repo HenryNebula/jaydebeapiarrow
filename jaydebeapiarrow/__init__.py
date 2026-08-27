@@ -683,11 +683,8 @@ class Connection(object):
 
 # DB-API 2.0 Cursor Object
 def _decimal_string_column_indexes(meta):
-    """Return 0-based indexes of DECIMAL/NUMERIC columns in a JDBC
-    ResultSetMetaData. The Java layer transfers such columns as UTF-8 when
-    their values cannot fit an Arrow decimal vector (> 76 digits) or when the
-    driver reports no precision (unbounded numerics, e.g. Postgres NUMERIC);
-    the cursor rebuilds exact Decimals from those strings."""
+    """0-based indexes of DECIMAL/NUMERIC columns in ResultSetMetaData;
+    these may arrive as UTF-8 strings (see OverriddenConsumer)."""
     import jpype
     types = jpype.java.sql.Types
     decimal_consts = (types.DECIMAL, types.NUMERIC)
@@ -731,8 +728,7 @@ def _infer_decimal_widths(strings):
         if value is None:
             continue
         if "E" in value or "e" in value:
-            # java.math.BigDecimal.toString() uses scientific notation for
-            # extreme scales (e.g. "1E-7")
+            # BigDecimal.toString() uses scientific notation, e.g. "1E-7"
             t = Decimal(value).as_tuple()
             digits = len(t.digits)
             scale = max(0, -t.exponent)
@@ -1023,10 +1019,8 @@ class Cursor(object):
         return self._iter
 
     def _jdbc_decimal_info(self):
-        """Cached per-column info for DECIMAL/NUMERIC columns of the current
-        result set: tuple of (0-based index, jdbc type name, precision,
-        scale), used both for restoring Decimals on row fetches and for
-        typing/provenance in the Arrow-native fetch paths."""
+        """Cached (0-based index, jdbc type name, precision, scale) tuples
+        for the result set's DECIMAL/NUMERIC columns."""
         if self._decimal_info is None:
             rows = []
             if self._meta is not None:
@@ -1044,11 +1038,8 @@ class Cursor(object):
         return self._decimal_info
 
     def _restore_decimal_columns(self, rows):
-        """Rebuild Decimal objects for DECIMAL/NUMERIC columns transferred as
-        UTF-8 strings (values beyond decimal256's 76-digit capacity, or
-        unbounded numeric columns where JDBC reports no precision). Columns
-        that stayed Arrow decimals already hold Decimal objects and are
-        skipped by the isinstance check."""
+        """Rebuild Decimals for DECIMAL/NUMERIC columns that arrived as
+        UTF-8 strings (beyond decimal256 capacity, or unbounded precision)."""
         if not rows:
             return rows
         if self._decimal_cols is None:
@@ -1057,11 +1048,9 @@ class Cursor(object):
         if not self._decimal_cols:
             return rows
         first = rows[0]
-        # Arrow column types are fixed for the whole result set, so the first
-        # row decides whether this batch needs restoring at all — queries
-        # whose decimal columns stayed Arrow decimals skip the rebuild
-        # entirely. A None value is ambiguous (nullable column of either
-        # kind) and conservatively takes the restoring path below.
+        # Column types are fixed per result set, so the first row decides
+        # whether this batch needs restoring; None is ambiguous and
+        # restores conservatively.
         needs_restore = False
         for i in self._decimal_cols:
             if i >= len(first):
@@ -1071,10 +1060,6 @@ class Cursor(object):
                 break
         if not needs_restore:
             return rows
-        # Rebuild row-wise, mutating only the decimal positions. A zip
-        # transpose variant was benchmarked across result-set shapes
-        # (1-20 columns) and lost everywhere: it pays two full passes
-        # over every column, while this touches only the decimal ones.
         cols = [i for i in self._decimal_cols if i < len(first)]
         out = []
         for row in rows:
@@ -1183,13 +1168,10 @@ class Cursor(object):
             This is significantly faster (3-4x) than fetchall() for Arrow-native workflows
             because it avoids converting to Python tuples.
 
-            DECIMAL/NUMERIC columns whose values cannot fit Arrow's
-            decimal256 type (declared precision > 76, or unbounded numerics
-            where JDBC reports no precision) are transferred as utf8
-            strings to preserve exact values. Those fields carry Arrow
-            metadata (jdbc_type, jdbc_precision, jdbc_scale) so consumers
-            can recover the intended type and cast deliberately, e.g.
-            ``batch.column(i).cast(pa.decimal256(76, scale))``.
+            DECIMAL/NUMERIC columns beyond decimal256 capacity (declared
+            precision > 76, or unbounded numerics) arrive as utf8 carrying
+            jdbc_type/jdbc_precision/jdbc_scale field metadata, so consumers
+            can recover the intended type and cast deliberately.
         """
         if not self._rs:
             raise Error("No result set")
@@ -1244,9 +1226,7 @@ class Cursor(object):
             # Return empty table with inferred schema
             return pa.Table.from_arrays([])
         table = pa.Table.from_batches(batches)
-        # Fallback decimal columns that fit decimal256 become real decimal
-        # columns again; the shape is inferred from the data so the type
-        # matches the actual values.
+        # Cast fallback columns back to decimal256 when the data fits.
         fallback = _decimal_fallback_indexes(
             table.schema, self._jdbc_decimal_info())
         for index in fallback:
@@ -1254,7 +1234,6 @@ class Cursor(object):
             max_digits, max_scale = _infer_decimal_widths(
                 value for chunk in column.chunks for value in chunk.to_pylist())
             if max_digits > 76:
-                # No Arrow decimal type holds it; keep the exact utf8 form.
                 continue
             target = pa.decimal256(max(max_digits, 1), max_scale)
             try:
@@ -1292,9 +1271,8 @@ class Cursor(object):
             )
         table = self.fetch_arrow_table()
         df = table.to_pandas()
-        # Columns still utf8 (values beyond decimal256) are converted
-        # value-by-value so every decimal column has the same object dtype
-        # holding decimal.Decimal, whatever its precision.
+        # Columns still utf8 (beyond decimal256) become Decimal objects too,
+        # so every decimal column has the same object dtype.
         fallback = _decimal_fallback_indexes(
             table.schema, self._jdbc_decimal_info())
         for index in fallback:

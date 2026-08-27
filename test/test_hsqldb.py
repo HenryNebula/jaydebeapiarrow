@@ -232,17 +232,11 @@ class HsqldbArrayTypeTest(unittest.TestCase):
 
 
 class HsqldbFetchPerformanceTest(unittest.TestCase):
-    """Relative-performance regression tests against the JPype row-by-row
-    path (original jaydebeapi).
-
-    Unlike benchmark/ (PostgreSQL, millions of rows), these use small
-    in-memory HSQLDB tables — just enough rows for the vectorized Arrow
-    transfer to dominate the noise. Only the *ratio* between the two paths
-    is asserted, never an absolute duration, so the result does not depend
-    on the machine the suite runs on. The required speedups sit far below
-    the measured ones (mixed columns: ~5.5-7x, high-precision fallback:
-    ~3-4x on a dev machine) so ordinary CI jitter cannot flip them, while
-    a real regression to row-by-row performance still fails them.
+    """Relative speed vs the row-by-row JPype path (original jaydebeapi),
+    on small in-memory tables: only the ratio is asserted, never an
+    absolute duration, so the result is machine-independent. Required
+    speedups sit far below the measured ones (~5.5-7x mixed columns,
+    ~3-4x high-precision fallback) so CI jitter cannot flip them.
     """
 
     ROWS = 10000
@@ -263,8 +257,8 @@ class HsqldbFetchPerformanceTest(unittest.TestCase):
             'org.hsqldb.jdbcDriver', 'jdbc:hsqldb:mem:perftest',
             ['SA', ''],
             jvm_args=_SUPPRESS_LOGGING_ARGS)
-        # Same in-memory database through the original row-by-row library;
-        # reuses the JVM started by jaydebeapiarrow above.
+        # Same in-memory DB through the row-by-row library, reusing the
+        # running JVM.
         cls.legacy_conn = jaydebeapi.connect(
             'org.hsqldb.jdbcDriver', 'jdbc:hsqldb:mem:perftest', ['SA', ''])
         with cls.conn.cursor() as cursor:
@@ -322,10 +316,9 @@ class HsqldbFetchPerformanceTest(unittest.TestCase):
         return best_ms, rows
 
     def _assert_faster(self, table, required_speedup):
-        """Assert fetchall() through Arrow stays ahead of jaydebeapi, and
-        cross-check that both paths fetched the same rows."""
-        # Warm both paths first: JVM class loading and JIT compilation
-        # otherwise dominate the first timed run.
+        """Assert fetchall() through Arrow stays ahead of jaydebeapi on
+        identical data."""
+        # Warmup: class loading and JIT otherwise dominate the first run.
         self._fetchall(self.conn, table)
         self._fetchall(self.legacy_conn, table)
 
@@ -336,10 +329,8 @@ class HsqldbFetchPerformanceTest(unittest.TestCase):
 
         self.assertEqual(len(arrow_rows), self.ROWS)
         self.assertEqual(len(legacy_rows), self.ROWS)
-        # Spot-check agreement on columns where both paths return Python
-        # natives. Scaled NUMERICs cannot be compared: jaydebeapi's
-        # converter degrades them to doubles (doubleValue()), which is
-        # exactly the precision loss this fork fixes.
+        # Compare only columns where jaydebeapi returns Python natives;
+        # its NUMERIC converter degrades scaled values to doubles.
         for arrow_row, legacy_row in zip(arrow_rows[:1] + arrow_rows[-1:],
                                          legacy_rows[:1] + legacy_rows[-1:]):
             self.assertEqual(arrow_row[0], legacy_row[0])
@@ -351,16 +342,15 @@ class HsqldbFetchPerformanceTest(unittest.TestCase):
         return arrow_rows
 
     def test_fetchall_faster_than_jaydebeapi(self):
-        """The drop-in fetchall() must stay well ahead of the row-by-row
-        JPype path on typical mixed-column data."""
+        """fetchall() must stay well ahead of the row-by-row path on
+        typical mixed-column data."""
         arrow_rows = self._assert_faster('perf_mixed', self.REQUIRED_SPEEDUP)
         self.assertEqual(arrow_rows[0][3], 'the quick brown fox jumps')
         self.assertEqual(arrow_rows[0][4], Decimal('12345.6789'))
 
     def test_high_precision_decimal_fetch_faster_than_jaydebeapi(self):
-        """The issue #119 fallback — NUMERIC beyond decimal256 capacity,
-        transferred as strings and rebuilt into Decimals in Python — must
-        also stay faster than the row-by-row path it replaces."""
+        """The issue #119 string fallback must stay faster than the
+        row-by-row path it replaces."""
         arrow_rows = self._assert_faster(
             'perf_hp', self.REQUIRED_SPEEDUP_HIGH_PRECISION)
         self.assertEqual(arrow_rows[0][1], Decimal(self.HP_VALUE))

@@ -60,10 +60,7 @@ public class ExplicitTypeMapper {
 
     private JdbcFieldInfo createDefaultDecimalFieldInfo(int precision, int scale) {
         if (precision < 1) {
-            // The driver reports no precision (unbounded/unknown numeric,
-            // e.g. Postgres untyped NUMERIC, Oracle NUMBER): value sizes are
-            // unknowable at schema time, so transfer as strings; the Python
-            // side rebuilds exact Decimals from them.
+            // No declared precision (unbounded numeric): transfer as strings.
             return new JdbcFieldInfo(Types.VARCHAR);
         }
         else {

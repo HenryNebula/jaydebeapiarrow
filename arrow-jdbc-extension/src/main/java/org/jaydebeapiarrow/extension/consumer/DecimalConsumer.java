@@ -40,8 +40,7 @@ import org.apache.arrow.vector.FieldVector;
  * decimal representation before setting the scale to match the vector.
  *
  * Supports both decimal128 (DecimalVector, up to 38 digits) and decimal256
- * (Decimal256Vector, up to 76 digits) targets, mirroring how upstream
- * arrow-jdbc maps DECIMAL/NUMERIC columns whose precision exceeds 38.
+ * (Decimal256Vector, up to 76 digits) targets.
  */
 public class DecimalConsumer {
 
@@ -59,9 +58,8 @@ public class DecimalConsumer {
             FieldVector vector, int index, boolean nullable, RoundingMode roundingMode,
             int scale, int precision) {
         DecimalWriter writer = writerFor(vector);
-        // Never validate against a precision the vector cannot actually hold,
-        // so oversized values fail below with an actionable error instead of a
-        // raw UnsupportedOperationException from DecimalUtility.
+        // Cap at what the vector holds so oversized values fail below with
+        // an actionable error instead of a raw DecimalUtility exception.
         int effectivePrecision = Math.min(precision, maxPrecision(vector));
         if (nullable) {
             return new NullableDecimalConsumer(writer, index, roundingMode, scale, effectivePrecision);

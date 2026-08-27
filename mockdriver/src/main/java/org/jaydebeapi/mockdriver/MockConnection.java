@@ -183,9 +183,8 @@ public abstract class MockConnection implements Connection {
   }
 
   public final void mockSingleRowDecimalResult(BigDecimal value, int precision, int scale) throws SQLException {
-    // Like mockHighPrecisionDecimalResult, but the ResultSet terminates after
-    // one row — required for exhaustive fetches (fetchall, fetch_arrow_*),
-    // since the other mocks stub next() as unconditionally true.
+    // Terminates after one row, unlike the other mocks (whose next() is
+    // unconditionally true), so exhaustive fetches work.
     PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
     Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
     mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for single-row Decimal)");
