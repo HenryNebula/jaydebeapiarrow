@@ -2,8 +2,14 @@
 
 import jaydebeapiarrow
 import os
+import time
 import unittest
 from decimal import Decimal
+
+try:
+    import jaydebeapi
+except ImportError:
+    jaydebeapi = None
 
 try:
     from test._base import IntegrationTestBase, _THIS_DIR, _SUPPRESS_LOGGING_ARGS
@@ -223,3 +229,138 @@ class HsqldbArrayTypeTest(unittest.TestCase):
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0], [10, 20, 30])
         self.assertEqual(result[1], ["foo", "bar", "baz"])
+
+
+class HsqldbFetchPerformanceTest(unittest.TestCase):
+    """Relative-performance regression tests against the JPype row-by-row
+    path (original jaydebeapi).
+
+    Unlike benchmark/ (PostgreSQL, millions of rows), these use small
+    in-memory HSQLDB tables — just enough rows for the vectorized Arrow
+    transfer to dominate the noise. Only the *ratio* between the two paths
+    is asserted, never an absolute duration, so the result does not depend
+    on the machine the suite runs on. The required speedups sit far below
+    the measured ones (mixed columns: ~5.5-7x, high-precision fallback:
+    ~3-4x on a dev machine) so ordinary CI jitter cannot flip them, while
+    a real regression to row-by-row performance still fails them.
+    """
+
+    ROWS = 10000
+    REPS = 3
+    REQUIRED_SPEEDUP = 2.0
+    REQUIRED_SPEEDUP_HIGH_PRECISION = 1.5
+
+    HP_VALUE = ('123.4567890123456789012345678901234567890'
+                '123456789012345678901234')
+
+    @classmethod
+    def setUpClass(cls):
+        if jaydebeapi is None:
+            raise unittest.SkipTest(
+                'original jaydebeapi is not installed; install it to run '
+                'the performance regression tests')
+        cls.conn = jaydebeapiarrow.connect(
+            'org.hsqldb.jdbcDriver', 'jdbc:hsqldb:mem:perftest',
+            ['SA', ''],
+            jvm_args=_SUPPRESS_LOGGING_ARGS)
+        # Same in-memory database through the original row-by-row library;
+        # reuses the JVM started by jaydebeapiarrow above.
+        cls.legacy_conn = jaydebeapi.connect(
+            'org.hsqldb.jdbcDriver', 'jdbc:hsqldb:mem:perftest', ['SA', ''])
+        with cls.conn.cursor() as cursor:
+            cursor.execute(
+                'CREATE TABLE perf_mixed ('
+                'id BIGINT, int_val INT, double_val DOUBLE, '
+                'str_val VARCHAR(64), dec_val NUMERIC(20, 4))')
+            cursor.execute(
+                'INSERT INTO perf_mixed VALUES ('
+                "1, 42, 3.14, 'the quick brown fox jumps', 12345.6789)")
+            cls._double_rows(cursor, 'perf_mixed',
+                             ('id', 'int_val', 'double_val',
+                              'str_val', 'dec_val'), cls.ROWS)
+            cursor.execute('CREATE TABLE perf_hp (id BIGINT, val NUMERIC(1000, 64))')
+            cursor.execute('INSERT INTO perf_hp VALUES (1, %s)' % cls.HP_VALUE)
+            cls._double_rows(cursor, 'perf_hp', ('id', 'val'), cls.ROWS)
+
+    @classmethod
+    def tearDownClass(cls):
+        with cls.conn.cursor() as cursor:
+            cursor.execute('DROP TABLE perf_mixed IF EXISTS')
+            cursor.execute('DROP TABLE perf_hp IF EXISTS')
+        cls.conn.close()
+        cls.legacy_conn.close()
+
+    @staticmethod
+    def _double_rows(cursor, table, columns, target):
+        """Grow `table` to `target` rows by repeated INSERT..SELECT doubling."""
+        count = 1
+        while count < target:
+            step = min(count, target - count)
+            select_list = ', '.join(
+                '%s + %d' % (col, count) if col == 'id' else col
+                for col in columns)
+            cursor.execute(
+                'INSERT INTO %s SELECT %s FROM %s WHERE id <= %d'
+                % (table, select_list, table, step))
+            count += step
+
+    def _fetchall(self, connection, table):
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT * FROM %s' % table)
+            return cursor.fetchall()
+
+    @staticmethod
+    def _best_of_ms(fetch, reps):
+        """Fastest of `reps` timed calls, in milliseconds, plus the result."""
+        best_ms = None
+        rows = None
+        for _ in range(reps):
+            start = time.perf_counter()
+            rows = fetch()
+            elapsed = (time.perf_counter() - start) * 1000.0
+            best_ms = elapsed if best_ms is None else min(best_ms, elapsed)
+        return best_ms, rows
+
+    def _assert_faster(self, table, required_speedup):
+        """Assert fetchall() through Arrow stays ahead of jaydebeapi, and
+        cross-check that both paths fetched the same rows."""
+        # Warm both paths first: JVM class loading and JIT compilation
+        # otherwise dominate the first timed run.
+        self._fetchall(self.conn, table)
+        self._fetchall(self.legacy_conn, table)
+
+        arrow_ms, arrow_rows = self._best_of_ms(
+            lambda: self._fetchall(self.conn, table), self.REPS)
+        legacy_ms, legacy_rows = self._best_of_ms(
+            lambda: self._fetchall(self.legacy_conn, table), self.REPS)
+
+        self.assertEqual(len(arrow_rows), self.ROWS)
+        self.assertEqual(len(legacy_rows), self.ROWS)
+        # Spot-check agreement on columns where both paths return Python
+        # natives. Scaled NUMERICs cannot be compared: jaydebeapi's
+        # converter degrades them to doubles (doubleValue()), which is
+        # exactly the precision loss this fork fixes.
+        for arrow_row, legacy_row in zip(arrow_rows[:1] + arrow_rows[-1:],
+                                         legacy_rows[:1] + legacy_rows[-1:]):
+            self.assertEqual(arrow_row[0], legacy_row[0])
+
+        self.assertGreaterEqual(
+            legacy_ms / arrow_ms, required_speedup,
+            'Arrow fetchall() (%.1f ms) lost its speedup over the JPype '
+            'row-by-row path (%.1f ms)' % (arrow_ms, legacy_ms))
+        return arrow_rows
+
+    def test_fetchall_faster_than_jaydebeapi(self):
+        """The drop-in fetchall() must stay well ahead of the row-by-row
+        JPype path on typical mixed-column data."""
+        arrow_rows = self._assert_faster('perf_mixed', self.REQUIRED_SPEEDUP)
+        self.assertEqual(arrow_rows[0][3], 'the quick brown fox jumps')
+        self.assertEqual(arrow_rows[0][4], Decimal('12345.6789'))
+
+    def test_high_precision_decimal_fetch_faster_than_jaydebeapi(self):
+        """The issue #119 fallback — NUMERIC beyond decimal256 capacity,
+        transferred as strings and rebuilt into Decimals in Python — must
+        also stay faster than the row-by-row path it replaces."""
+        arrow_rows = self._assert_faster(
+            'perf_hp', self.REQUIRED_SPEEDUP_HIGH_PRECISION)
+        self.assertEqual(arrow_rows[0][1], Decimal(self.HP_VALUE))
