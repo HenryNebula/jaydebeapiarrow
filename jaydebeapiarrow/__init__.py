@@ -698,6 +698,55 @@ def _decimal_string_column_indexes(meta):
     return tuple(indexes)
 
 
+def _decimal_field_metadata(jdbc_type_name, precision, scale):
+    """Arrow field metadata marking a utf8 column as a DECIMAL/NUMERIC that
+    exceeded Arrow's decimal256 capacity (or had no declared precision), so
+    downstream consumers can recover its intended type."""
+    return {
+        "jdbc_type": str(jdbc_type_name),
+        "jdbc_precision": str(int(precision)),
+        "jdbc_scale": str(int(scale)),
+    }
+
+
+def _decimal_fallback_indexes(schema, decimal_meta):
+    """Map schema field index -> (jdbc_type_name, precision, scale) for
+    fields that arrived as utf8 but were DECIMAL/NUMERIC in JDBC metadata."""
+    import pyarrow as pa
+    fallback = {}
+    for index, jdbc_type_name, precision, scale in decimal_meta:
+        if index < len(schema):
+            dtype = schema.field(index).type
+            if pa.types.is_string(dtype) or pa.types.is_large_string(dtype):
+                fallback[index] = (jdbc_type_name, precision, scale)
+    return fallback
+
+
+def _infer_decimal_widths(strings):
+    """Scan decimal strings and return (max_total_digits, max_scale) — the
+    smallest decimal shape that holds every value."""
+    max_digits = 0
+    max_scale = 0
+    for value in strings:
+        if value is None:
+            continue
+        if "E" in value or "e" in value:
+            # java.math.BigDecimal.toString() uses scientific notation for
+            # extreme scales (e.g. "1E-7")
+            t = Decimal(value).as_tuple()
+            digits = len(t.digits)
+            scale = max(0, -t.exponent)
+        else:
+            int_part, _, frac = value.partition(".")
+            digits = len(int_part.lstrip("-")) + len(frac)
+            scale = len(frac)
+        if digits > max_digits:
+            max_digits = digits
+        if scale > max_scale:
+            max_scale = scale
+    return max_digits, max_scale
+
+
 class Cursor(object):
 
     _rs = None
@@ -705,6 +754,7 @@ class Cursor(object):
     _iter = None
     _buffer = None
     _decimal_cols = None
+    _decimal_info = None
 
     def __init__(self, connection):
         self._connection = connection
@@ -770,6 +820,7 @@ class Cursor(object):
         self._meta = None
         self._description = None
         self._decimal_cols = None
+        self._decimal_info = None
 
     # def _set_stmt_parms(self, prep_stmt, parameters):
     #     for i in range(len(parameters)):
@@ -971,6 +1022,27 @@ class Cursor(object):
         self._iter = convert_jdbc_rs_to_arrow_iterator(self._rs, batch_size=batch_size)
         return self._iter
 
+    def _jdbc_decimal_info(self):
+        """Cached per-column info for DECIMAL/NUMERIC columns of the current
+        result set: tuple of (0-based index, jdbc type name, precision,
+        scale), used both for restoring Decimals on row fetches and for
+        typing/provenance in the Arrow-native fetch paths."""
+        if self._decimal_info is None:
+            rows = []
+            if self._meta is not None:
+                import jpype
+                types = jpype.java.sql.Types
+                decimal_consts = (int(types.DECIMAL), int(types.NUMERIC))
+                m = self._meta
+                for col in range(1, m.getColumnCount() + 1):
+                    if int(m.getColumnType(col)) in decimal_consts:
+                        rows.append((col - 1,
+                                     str(m.getColumnTypeName(col)),
+                                     int(m.getPrecision(col)),
+                                     int(m.getScale(col))))
+            self._decimal_info = tuple(rows)
+        return self._decimal_info
+
     def _restore_decimal_columns(self, rows):
         """Rebuild Decimal objects for DECIMAL/NUMERIC columns transferred as
         UTF-8 strings (values beyond decimal256's 76-digit capacity, or
@@ -1104,6 +1176,14 @@ class Cursor(object):
         Note:
             This is significantly faster (3-4x) than fetchall() for Arrow-native workflows
             because it avoids converting to Python tuples.
+
+            DECIMAL/NUMERIC columns whose values cannot fit Arrow's
+            decimal256 type (declared precision > 76, or unbounded numerics
+            where JDBC reports no precision) are transferred as utf8
+            strings to preserve exact values. Those fields carry Arrow
+            metadata (jdbc_type, jdbc_precision, jdbc_scale) so consumers
+            can recover the intended type and cast deliberately, e.g.
+            ``batch.column(i).cast(pa.decimal256(76, scale))``.
         """
         if not self._rs:
             raise Error("No result set")
@@ -1115,7 +1195,20 @@ class Cursor(object):
             while it.hasNext():
                 root = it.next()
                 try:
-                    yield pa.jvm.record_batch(root)
+                    batch = pa.jvm.record_batch(root)
+                    fallback = _decimal_fallback_indexes(
+                        batch.schema, self._jdbc_decimal_info())
+                    if fallback:
+                        fields = []
+                        for i, field in enumerate(batch.schema):
+                            if i in fallback:
+                                jdbc_type, precision, scale = fallback[i]
+                                field = field.with_metadata(_decimal_field_metadata(
+                                    jdbc_type, precision, scale))
+                            fields.append(field)
+                        batch = pa.RecordBatch.from_arrays(
+                            batch.columns, schema=pa.schema(fields))
+                    yield batch
                 finally:
                     root.clear()
         finally:
@@ -1144,7 +1237,31 @@ class Cursor(object):
         if not batches:
             # Return empty table with inferred schema
             return pa.Table.from_arrays([])
-        return pa.Table.from_batches(batches)
+        table = pa.Table.from_batches(batches)
+        # Fallback decimal columns that fit decimal256 become real decimal
+        # columns again; the shape is inferred from the data so the type
+        # matches the actual values.
+        fallback = _decimal_fallback_indexes(
+            table.schema, self._jdbc_decimal_info())
+        for index in fallback:
+            column = table.column(index)
+            max_digits, max_scale = _infer_decimal_widths(
+                value for chunk in column.chunks for value in chunk.to_pylist())
+            if max_digits > 76:
+                # No Arrow decimal type holds it; keep the exact utf8 form.
+                continue
+            target = pa.decimal256(max(max_digits, 1), max_scale)
+            try:
+                casted = column.cast(target)
+            except (pa.ArrowInvalid, pa.ArrowNotImplementedError):
+                continue
+            jdbc_type, precision, scale = fallback[index]
+            old_field = table.schema.field(index)
+            field = pa.field(
+                old_field.name, target, nullable=old_field.nullable,
+                metadata=_decimal_field_metadata(jdbc_type, precision, scale))
+            table = table.set_column(index, field, casted)
+        return table
 
     def fetch_df(self):
         """
@@ -1167,7 +1284,18 @@ class Cursor(object):
                 "fetch_df() requires pandas. "
                 "Install it with: pip install jaydebeapiarrow[pandas]"
             )
-        return self.fetch_arrow_table().to_pandas()
+        table = self.fetch_arrow_table()
+        df = table.to_pandas()
+        # Columns still utf8 (values beyond decimal256) are converted
+        # value-by-value so every decimal column has the same object dtype
+        # holding decimal.Decimal, whatever its precision.
+        fallback = _decimal_fallback_indexes(
+            table.schema, self._jdbc_decimal_info())
+        for index in fallback:
+            name = df.columns[index]
+            df[name] = df[name].map(
+                lambda v: Decimal(v) if isinstance(v, str) else v)
+        return df
 
     def __enter__(self):
         return self

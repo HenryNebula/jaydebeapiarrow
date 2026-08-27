@@ -182,6 +182,27 @@ public abstract class MockConnection implements Connection {
     stubPrepareStatement(mockPreparedStatement);
   }
 
+  public final void mockSingleRowDecimalResult(BigDecimal value, int precision, int scale) throws SQLException {
+    // Like mockHighPrecisionDecimalResult, but the ResultSet terminates after
+    // one row — required for exhaustive fetches (fetchall, fetch_arrow_*),
+    // since the other mocks stub next() as unconditionally true.
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for single-row Decimal)");
+    Mockito.when(mockPreparedStatement.getResultSet()).thenReturn(mockResultSet);
+    Mockito.when(mockResultSet.next()).thenReturn(true, false);
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    mockGeneralResultSetMetaData(mockMetaData, Types.DECIMAL);
+    Mockito.when(mockMetaData.getPrecision(1)).thenReturn(precision);
+    Mockito.when(mockMetaData.getScale(1)).thenReturn(scale);
+    Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
+
+    Mockito.when(mockResultSet.getObject(1)).thenReturn(value);
+    Mockito.when(mockResultSet.getString(1)).thenReturn(value.toString());
+    Mockito.when(mockResultSet.wasNull()).thenReturn(false);
+    stubPrepareStatement(mockPreparedStatement);
+  }
+
   public final void mockIntegerDecimalResult(long value, int precision, int scale) throws SQLException {
     PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
     Mockito.when(mockPreparedStatement.execute()).thenReturn(true);

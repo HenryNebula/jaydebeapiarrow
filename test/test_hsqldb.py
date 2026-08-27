@@ -112,6 +112,30 @@ class HsqldbHighPrecisionNumericTest(unittest.TestCase):
         self.assertIsInstance(result[0], Decimal)
         self.assertEqual(result[0], Decimal(literal))
 
+    def test_arrow_paths_high_precision_numeric(self):
+        """Arrow-native paths keep decimal semantics where possible:
+        batches label fallback columns with jdbc metadata, tables cast them
+        back to decimal256 when the data fits (issue #119)."""
+        import pyarrow as pa
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE t_hp4 (val NUMERIC(1000, 64))")
+            cursor.execute("INSERT INTO t_hp4 VALUES (123.4567)")
+
+            cursor.execute("SELECT val FROM t_hp4")
+            batch = next(cursor.fetch_arrow_batches())
+            self.assertTrue(pa.types.is_string(batch.schema.field(0).type))
+            self.assertEqual(
+                batch.schema.field(0).metadata.get(b"jdbc_precision"), b"1000")
+            self.assertEqual(
+                batch.schema.field(0).metadata.get(b"jdbc_scale"), b"64")
+
+            cursor.execute("SELECT val FROM t_hp4")
+            table = cursor.fetch_arrow_table()
+            self.assertTrue(
+                pa.types.is_decimal256(table.schema.field(0).type))
+            self.assertEqual(
+                table.column(0).to_pylist()[0], Decimal("123.4567"))
+
 
 class HsqldbArrayTypeTest(unittest.TestCase):
     """Test ARRAY type support — reading and writing with multiple element types."""
