@@ -1071,14 +1071,20 @@ class Cursor(object):
                 break
         if not needs_restore:
             return rows
-        # Transpose to columns, convert the decimal strings in bulk, and
-        # transpose back — measurably faster than a per-row rebuild loop.
-        lists = list(zip(*rows))
-        for i in self._decimal_cols:
-            if i < len(lists):
-                lists[i] = [Decimal(v) if isinstance(v, str) else v
-                            for v in lists[i]]
-        return [tuple(t) for t in zip(*lists)]
+        # Rebuild row-wise, mutating only the decimal positions. A zip
+        # transpose variant was benchmarked across result-set shapes
+        # (1-20 columns) and lost everywhere: it pays two full passes
+        # over every column, while this touches only the decimal ones.
+        cols = [i for i in self._decimal_cols if i < len(first)]
+        out = []
+        for row in rows:
+            row = list(row)
+            for i in cols:
+                v = row[i]
+                if isinstance(v, str):
+                    row[i] = Decimal(v)
+            out.append(tuple(row))
+        return out
 
     def fetchone(self):
         if not self._rs:
