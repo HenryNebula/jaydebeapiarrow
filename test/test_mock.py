@@ -252,6 +252,15 @@ class MockTest(unittest.TestCase):
         self.assertIsInstance(result[0], Decimal)
         self.assertEqual(result[0], Decimal("0.123456789012345678901234567890"))
 
+    def test_unbounded_decimal_null_value(self):
+        """SQL NULL in an unbounded (precision 0) decimal column takes the
+        string path and must return None, not crash or become 0."""
+        self.conn.jconn.mockNullDecimalResult(0, 0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertIsNone(result[0])
+
     def test_decimal_integer_from_getObject(self):
         """Drivers like Oracle return BigDecimal with scale 0 for integer-like
         NUMERIC columns (e.g., NUMBER(10)). The vector now preserves the

@@ -984,14 +984,29 @@ class Cursor(object):
                                    if self._meta is not None else ())
         if not self._decimal_cols:
             return rows
-        restored = []
-        for row in rows:
-            row = list(row)
-            for i in self._decimal_cols:
-                if i < len(row) and isinstance(row[i], str):
-                    row[i] = Decimal(row[i])
-            restored.append(tuple(row))
-        return restored
+        first = rows[0]
+        # Arrow column types are fixed for the whole result set, so the first
+        # row decides whether this batch needs restoring at all — queries
+        # whose decimal columns stayed Arrow decimals skip the rebuild
+        # entirely. A None value is ambiguous (nullable column of either
+        # kind) and conservatively takes the restoring path below.
+        needs_restore = False
+        for i in self._decimal_cols:
+            if i >= len(first):
+                continue
+            if isinstance(first[i], str) or first[i] is None:
+                needs_restore = True
+                break
+        if not needs_restore:
+            return rows
+        # Transpose to columns, convert the decimal strings in bulk, and
+        # transpose back — measurably faster than a per-row rebuild loop.
+        lists = list(zip(*rows))
+        for i in self._decimal_cols:
+            if i < len(lists):
+                lists[i] = [Decimal(v) if isinstance(v, str) else v
+                            for v in lists[i]]
+        return [tuple(t) for t in zip(*lists)]
 
     def fetchone(self):
         if not self._rs:
