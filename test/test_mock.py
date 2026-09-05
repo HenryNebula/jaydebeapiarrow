@@ -1451,6 +1451,25 @@ class MockTest(unittest.TestCase):
                 cursor.fetchall()
 
 
+class DecimalWidthInferenceTest(unittest.TestCase):
+    """_infer_decimal_widths must count the integer digits a positive
+    exponent pads in, or the decimal256 upgrade is silently missed."""
+
+    def test_exponent_notation(self):
+        from jaydebeapiarrow import _infer_decimal_widths
+        self.assertEqual(_infer_decimal_widths(["1E+7"]), (8, 0))
+        self.assertEqual(_infer_decimal_widths(["1.5E+3"]), (4, 0))
+        self.assertEqual(_infer_decimal_widths(["1E-7"]), (1, 7))
+        self.assertEqual(
+            _infer_decimal_widths(["1E+7", "123.45", "1E-7", None]), (8, 7))
+
+    def test_plain_values(self):
+        from jaydebeapiarrow import _infer_decimal_widths
+        self.assertEqual(_infer_decimal_widths(["-123.4500"]), (7, 4))
+        self.assertEqual(_infer_decimal_widths([]), (0, 0))
+        self.assertEqual(_infer_decimal_widths([None]), (0, 0))
+
+
 class ParallelConnectTest(unittest.TestCase):
     """Test that parallel connect() calls are thread-safe (issue #60)."""
 

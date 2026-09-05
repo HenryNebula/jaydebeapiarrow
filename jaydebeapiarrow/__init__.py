@@ -717,7 +717,8 @@ def _infer_decimal_widths(strings):
         if "E" in value or "e" in value:
             # BigDecimal.toString() uses scientific notation, e.g. "1E-7"
             t = Decimal(value).as_tuple()
-            digits = len(t.digits)
+            # A positive exponent pads the integer part ("1E+7" = 8 digits).
+            digits = len(t.digits) + max(0, t.exponent)
             scale = max(0, -t.exponent)
         else:
             int_part, _, frac = value.partition(".")
