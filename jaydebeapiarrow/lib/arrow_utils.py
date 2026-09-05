@@ -32,8 +32,8 @@ def convert_jdbc_rs_to_arrow_iterator(rs, batch_size=1024):
 def fetch_next_batch(it):
     """
     Fetches the next batch from the ArrowVectorIterator 'it'.
-    Returns a list of rows (tuples).
-    Returns empty list if iterator is exhausted.
+    Returns (rows, schema): a list of rows (tuples) and the batch's Arrow
+    schema. Both are empty/None once the iterator is exhausted.
 
     When the iterator is exhausted, it is automatically closed to release
     the Arrow allocator and JDBC resources.
@@ -49,9 +49,10 @@ def fetch_next_batch(it):
                 _handle_sql_exception()
             raise
         try:
-            batch = _import_batch_via_cdata(root).to_pylist()
-            rows = [tuple(r.values()) for r in batch]
-            return rows
+            batch = _import_batch_via_cdata(root)
+            schema = batch.schema
+            rows = [tuple(r.values()) for r in batch.to_pylist()]
+            return rows, schema
         finally:
             root.clear()
     else:
@@ -60,7 +61,7 @@ def fetch_next_batch(it):
             it.close()
         except Exception:
             pass
-    return []
+    return [], None
 
 
 def _find_decimal_conversion_message(exc):

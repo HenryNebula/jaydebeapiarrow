@@ -49,9 +49,24 @@ public class OverriddenConsumer {
             case Types.NUMERIC:
                 int precision = fieldInfo.getPrecision();
                 int scale = fieldInfo.getScale();
+                // Unbounded precision only reaches this branch when it
+                // bypasses ExplicitTypeMapper's VARCHAR mapping (e.g.
+                // DECIMAL array elements); see issue #121.
                 if (precision <= 0) precision = 38;
                 if (scale < 0) scale = 0;
-                return new ArrowType.Decimal(precision, scale, 128);
+                // Beyond decimal256's 76 digits, transfer as utf8; the
+                // Python side rebuilds exact Decimals from the strings.
+                if (precision > DecimalConsumer.DECIMAL256_MAX_PRECISION) {
+                    return new ArrowType.Utf8();
+                }
+                // Precision beyond decimal128's 38 digits maps to decimal256.
+                if (precision > 38) {
+                    return new ArrowType.Decimal(
+                            Math.min(precision, DecimalConsumer.DECIMAL256_MAX_PRECISION),
+                            Math.min(scale, precision),
+                            256);
+                }
+                return new ArrowType.Decimal(precision, Math.min(scale, precision), 128);
             default:
                 return JdbcToArrowUtils.getArrowTypeFromJdbcType(fieldInfo, null);
         }
@@ -86,7 +101,7 @@ public class OverriddenConsumer {
             case Decimal:
                 ArrowType.Decimal decimalType = (ArrowType.Decimal) arrowType;
                 return DecimalConsumer.createConsumer(
-                        (DecimalVector) vector, columnIndex, nullable,
+                        vector, columnIndex, nullable,
                         config.getBigDecimalRoundingMode() != null
                                 ? config.getBigDecimalRoundingMode()
                                 : RoundingMode.HALF_UP,

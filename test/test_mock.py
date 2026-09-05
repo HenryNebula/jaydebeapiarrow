@@ -195,6 +195,140 @@ class MockTest(unittest.TestCase):
 
         self.assertEqual(result[0], Decimal("123456789012345678901234567890123456.79"))
 
+    def test_decimal_precision_above_38_uses_decimal256(self):
+        """DECIMAL/NUMERIC precision in the 39-76 range must not crash with
+        'Decimal size greater than 16 bytes' — upstream arrow-jdbc maps these
+        columns to decimal256, and so must we (issue #119)."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        value = BigDecimal("12345678901234567890.123456789012345678901234567890")
+        self.conn.jconn.mockHighPrecisionDecimalResult(value, 50, 30)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(
+            result[0], Decimal("12345678901234567890.123456789012345678901234567890"))
+
+    def test_numeric_1000_scale_64_small_value_round_trips(self):
+        """Issue #119: NUMERIC(1000, 64) columns crashed with
+        UnsupportedOperationException 'Decimal size greater than 16 bytes'.
+        Small values fit decimal256, so they should round-trip exactly."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        value = BigDecimal("123.4567")
+        self.conn.jconn.mockHighPrecisionDecimalResult(value, 1000, 64)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal("123.4567"))
+
+    def test_numeric_precision_beyond_decimal256_returns_exact_decimal(self):
+        """Columns declared beyond decimal256's 76-digit capacity (e.g.
+        NUMERIC(1000, 0)) are transferred as strings and rebuilt into exact
+        Decimals on the Python side (issue #119)."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        value = BigDecimal("1" + "0" * 79)  # 80 digits, scale 0
+        self.conn.jconn.mockHighPrecisionDecimalResult(value, 1000, 0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+
+        self.assertIsInstance(result[0], Decimal)
+        self.assertEqual(result[0], Decimal("1" + "0" * 79))
+
+    def test_unbounded_decimal_returns_exact_decimal(self):
+        """Drivers reporting no precision (JDBC precision 0, e.g. Postgres
+        untyped NUMERIC) must round-trip exactly instead of being rounded to
+        the old DECIMAL(38, 17) default scale."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        value = BigDecimal("0.123456789012345678901234567890")  # 30 fractional digits
+        self.conn.jconn.mockHighPrecisionDecimalResult(value, 0, 0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+
+        self.assertIsInstance(result[0], Decimal)
+        self.assertEqual(result[0], Decimal("0.123456789012345678901234567890"))
+
+    def test_unbounded_decimal_null_value(self):
+        """SQL NULL in an unbounded (precision 0) decimal column takes the
+        string path and must return None, not crash or become 0."""
+        self.conn.jconn.mockNullDecimalResult(0, 0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertIsNone(result[0])
+
+    # -- Arrow-native paths for fallback decimals --
+
+    def test_fetch_arrow_batches_labels_fallback_decimal(self):
+        """Fallback decimal columns stream as utf8 carrying jdbc_* field
+        metadata so consumers can recover the intended type."""
+        import jpype
+        import pyarrow as pa
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockSingleRowDecimalResult(
+            BigDecimal("123.4567"), 1000, 64)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            batch = next(cursor.fetch_arrow_batches())
+        field = batch.schema.field(0)
+        self.assertTrue(pa.types.is_string(field.type))
+        self.assertEqual(field.metadata.get(b"jdbc_type"), b"DECIMAL")
+        self.assertEqual(field.metadata.get(b"jdbc_precision"), b"1000")
+        self.assertEqual(field.metadata.get(b"jdbc_scale"), b"64")
+
+    def test_fetch_arrow_table_casts_fallback_decimal_to_decimal256(self):
+        """Materialized tables cast fallback decimals back to decimal256
+        when the data fits, with the jdbc provenance preserved."""
+        import jpype
+        import pyarrow as pa
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockSingleRowDecimalResult(
+            BigDecimal("123.4567"), 1000, 64)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            table = cursor.fetch_arrow_table()
+        field = table.schema.field(0)
+        self.assertTrue(pa.types.is_decimal256(field.type))
+        self.assertEqual(field.metadata.get(b"jdbc_precision"), b"1000")
+        self.assertEqual(table.column(0).to_pylist()[0], Decimal("123.4567"))
+
+    def test_fetch_arrow_table_keeps_utf8_beyond_decimal256(self):
+        """Values exceeding decimal256 stay utf8 in the table (with jdbc
+        metadata) — no Arrow decimal type can represent them."""
+        import jpype
+        import pyarrow as pa
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        self.conn.jconn.mockSingleRowDecimalResult(
+            BigDecimal("1" + "0" * 79), 1000, 0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            table = cursor.fetch_arrow_table()
+        field = table.schema.field(0)
+        self.assertTrue(pa.types.is_string(field.type))
+        self.assertIsNotNone(field.metadata)
+        self.assertEqual(table.column(0).to_pylist()[0], "1" + "0" * 79)
+
+    def test_fetch_df_returns_decimal_objects(self):
+        """fetch_df gives object[Decimal] for fallback decimal columns,
+        including values beyond decimal256."""
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        try:
+            import pandas  # noqa: F401
+        except ImportError:
+            self.skipTest("pandas not installed")
+        self.conn.jconn.mockSingleRowDecimalResult(
+            BigDecimal("1" + "0" * 79), 1000, 0)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            df = cursor.fetch_df()
+        self.assertIsInstance(df.iloc[0, 0], Decimal)
+        self.assertEqual(df.iloc[0, 0], Decimal("1" + "0" * 79))
+
     def test_decimal_integer_from_getObject(self):
         """Drivers like Oracle return BigDecimal with scale 0 for integer-like
         NUMERIC columns (e.g., NUMBER(10)). The vector now preserves the
@@ -1315,6 +1449,25 @@ class MockTest(unittest.TestCase):
             cursor.execute("dummy stmt")
             with self.assertRaises(jaydebeapiarrow.DatabaseError):
                 cursor.fetchall()
+
+
+class DecimalWidthInferenceTest(unittest.TestCase):
+    """_infer_decimal_widths must count the integer digits a positive
+    exponent pads in, or the decimal256 upgrade is silently missed."""
+
+    def test_exponent_notation(self):
+        from jaydebeapiarrow import _infer_decimal_widths
+        self.assertEqual(_infer_decimal_widths(["1E+7"]), (8, 0))
+        self.assertEqual(_infer_decimal_widths(["1.5E+3"]), (4, 0))
+        self.assertEqual(_infer_decimal_widths(["1E-7"]), (1, 7))
+        self.assertEqual(
+            _infer_decimal_widths(["1E+7", "123.45", "1E-7", None]), (8, 7))
+
+    def test_plain_values(self):
+        from jaydebeapiarrow import _infer_decimal_widths
+        self.assertEqual(_infer_decimal_widths(["-123.4500"]), (7, 4))
+        self.assertEqual(_infer_decimal_widths([]), (0, 0))
+        self.assertEqual(_infer_decimal_widths([None]), (0, 0))
 
 
 class ParallelConnectTest(unittest.TestCase):
