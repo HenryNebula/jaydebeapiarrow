@@ -1255,10 +1255,16 @@ class Cursor(object):
         fallback = _decimal_fallback_indexes(
             table.schema, self._jdbc_decimal_info())
         for index in fallback:
-            # Positional access: column names may repeat.
+            # Positional access: column names may repeat. isetitem replaces
+            # the column wholesale (needed for the modern str dtype); pandas
+            # < 1.5 falls back to iloc assignment, where string columns are
+            # still object dtype.
             column = df.iloc[:, index].map(
                 lambda v: Decimal(v) if isinstance(v, str) else v)
-            df.isetitem(index, column)
+            if hasattr(df, 'isetitem'):
+                df.isetitem(index, column)
+            else:
+                df.iloc[:, index] = column
         return df
 
     def __enter__(self):

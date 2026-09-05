@@ -40,7 +40,7 @@ dependencies = [
 Homepage = "https://github.com/HenryNebula/jaydebeapiarrow"
 
 [project.optional-dependencies]
-pandas = ["pandas>=1.5"]
+pandas = ["pandas"]
 
 [dependency-groups]
 dev = [
