@@ -49,6 +49,9 @@ public class OverriddenConsumer {
             case Types.NUMERIC:
                 int precision = fieldInfo.getPrecision();
                 int scale = fieldInfo.getScale();
+                // Unbounded precision only reaches this branch when it
+                // bypasses ExplicitTypeMapper's VARCHAR mapping (e.g.
+                // DECIMAL array elements); see issue #121.
                 if (precision <= 0) precision = 38;
                 if (scale < 0) scale = 0;
                 // Beyond decimal256's 76 digits, transfer as utf8; the
@@ -60,10 +63,10 @@ public class OverriddenConsumer {
                 if (precision > 38) {
                     return new ArrowType.Decimal(
                             Math.min(precision, DecimalConsumer.DECIMAL256_MAX_PRECISION),
-                            Math.min(scale, DecimalConsumer.DECIMAL256_MAX_PRECISION),
+                            Math.min(scale, precision),
                             256);
                 }
-                return new ArrowType.Decimal(precision, scale, 128);
+                return new ArrowType.Decimal(precision, Math.min(scale, precision), 128);
             default:
                 return JdbcToArrowUtils.getArrowTypeFromJdbcType(fieldInfo, null);
         }

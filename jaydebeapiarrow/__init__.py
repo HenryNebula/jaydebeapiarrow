@@ -682,19 +682,6 @@ class Connection(object):
         self.close()
 
 # DB-API 2.0 Cursor Object
-def _decimal_string_column_indexes(meta):
-    """0-based indexes of DECIMAL/NUMERIC columns in ResultSetMetaData;
-    these may arrive as UTF-8 strings (see OverriddenConsumer)."""
-    import jpype
-    types = jpype.java.sql.Types
-    decimal_consts = (types.DECIMAL, types.NUMERIC)
-    indexes = []
-    for col in range(1, meta.getColumnCount() + 1):
-        if int(meta.getColumnType(col)) in decimal_consts:
-            indexes.append(col - 1)
-    return tuple(indexes)
-
-
 def _decimal_field_metadata(jdbc_type_name, precision, scale):
     """Arrow field metadata marking a utf8 column as a DECIMAL/NUMERIC that
     exceeded Arrow's decimal256 capacity (or had no declared precision), so
@@ -1037,30 +1024,18 @@ class Cursor(object):
             self._decimal_info = tuple(rows)
         return self._decimal_info
 
-    def _restore_decimal_columns(self, rows):
+    def _restore_decimal_columns(self, rows, schema=None):
         """Rebuild Decimals for DECIMAL/NUMERIC columns that arrived as
         UTF-8 strings (beyond decimal256 capacity, or unbounded precision)."""
-        if not rows:
+        if self._decimal_cols is None and schema is not None:
+            # Detect once from the batch schema — the ground truth of what
+            # the Java type mapping produced — instead of sniffing values,
+            # so nullable decimal128 columns are never falsely flagged.
+            self._decimal_cols = tuple(_decimal_fallback_indexes(
+                schema, self._jdbc_decimal_info()))
+        if not self._decimal_cols or not rows:
             return rows
-        if self._decimal_cols is None:
-            self._decimal_cols = (_decimal_string_column_indexes(self._meta)
-                                   if self._meta is not None else ())
-        if not self._decimal_cols:
-            return rows
-        first = rows[0]
-        # Column types are fixed per result set, so the first row decides
-        # whether this batch needs restoring; None is ambiguous and
-        # restores conservatively.
-        needs_restore = False
-        for i in self._decimal_cols:
-            if i >= len(first):
-                continue
-            if isinstance(first[i], str) or first[i] is None:
-                needs_restore = True
-                break
-        if not needs_restore:
-            return rows
-        cols = [i for i in self._decimal_cols if i < len(first)]
+        cols = [i for i in self._decimal_cols if i < len(rows[0])]
         out = []
         for row in rows:
             row = list(row)
@@ -1079,7 +1054,8 @@ class Cursor(object):
             return self._buffer.pop(0)
 
         it = self._get_iter()
-        rows = self._restore_decimal_columns(fetch_next_batch(it))
+        rows, schema = fetch_next_batch(it)
+        rows = self._restore_decimal_columns(rows, schema)
         if rows:
             self._buffer.extend(rows)
             return self._buffer.pop(0)
@@ -1106,7 +1082,8 @@ class Cursor(object):
                 result.extend(take)
             else:
                 it = self._get_iter()
-                rows = self._restore_decimal_columns(fetch_next_batch(it))
+                rows, schema = fetch_next_batch(it)
+                rows = self._restore_decimal_columns(rows, schema)
                 if not rows:
                     # Iterator exhausted and closed by fetch_next_batch
                     self._iter = None
@@ -1129,7 +1106,8 @@ class Cursor(object):
         # We can implement a more efficient fetchall if we want to avoid python loops for buffering,
         # but reusing fetch_next_batch is simpler.
         while True:
-            rows = self._restore_decimal_columns(fetch_next_batch(it))
+            rows, schema = fetch_next_batch(it)
+            rows = self._restore_decimal_columns(rows, schema)
             if not rows:
                 break
             result.extend(rows)
@@ -1276,9 +1254,10 @@ class Cursor(object):
         fallback = _decimal_fallback_indexes(
             table.schema, self._jdbc_decimal_info())
         for index in fallback:
-            name = df.columns[index]
-            df[name] = df[name].map(
+            # Positional access: column names may repeat.
+            column = df.iloc[:, index].map(
                 lambda v: Decimal(v) if isinstance(v, str) else v)
+            df.isetitem(index, column)
         return df
 
     def __enter__(self):
