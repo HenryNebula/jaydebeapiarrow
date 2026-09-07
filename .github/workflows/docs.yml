@@ -12,10 +12,11 @@ permissions:
   id-token: write
 
 # A Pages deployment replaces the whole site with the uploaded artifact, so
-# every run must publish both trees: production (master) at the root and the
-# preview (docs branch) under preview/. One concurrency group for all refs
-# keeps deploys queued and the published state identical regardless of which
-# branch triggered the run.
+# every run publishes the full state: production (master) at the root, plus
+# the preview (docs branch) under preview/. The preview is dropped from the
+# artifact once its build is identical to production (docs merged) or the
+# docs branch no longer exists, so /preview/ disappears without a manual
+# step. One concurrency group for all refs keeps deploys queued.
 concurrency:
   group: "pages"
   cancel-in-progress: false
@@ -38,6 +39,15 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
 
+      - name: Check for preview branch
+        id: preview
+        run: |
+          if git ls-remote --exit-code --heads origin docs > /dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout production docs (master)
         uses: actions/checkout@v4
         with:
@@ -45,6 +55,7 @@ jobs:
           path: prod
 
       - name: Checkout preview docs (docs branch)
+        if: steps.preview.outputs.exists == 'true'
         uses: actions/checkout@v4
         with:
           ref: docs
@@ -54,7 +65,13 @@ jobs:
         run: uv run mkdocs build -f prod/mkdocs.yml -d "$PWD/site"
 
       - name: Build preview docs into site/preview
-        run: uv run mkdocs build -f preview/mkdocs.yml -d "$PWD/site/preview"
+        if: steps.preview.outputs.exists == 'true'
+        run: |
+          uv run mkdocs build -f preview/mkdocs.yml -d "$PWD/site/preview"
+          if diff -r --brief --exclude=preview site site/preview; then
+            rm -rf site/preview
+            echo "Preview matches production; dropped from this deployment."
+          fi
 
       - uses: actions/upload-pages-artifact@v5
         with:
