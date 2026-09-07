@@ -11,8 +11,14 @@ permissions:
   pages: write
   id-token: write
 
+# A Pages deployment replaces the whole site with the uploaded artifact, so
+# every run publishes the full state: production (master) at the root, plus
+# the preview (docs branch) under preview/. The preview is dropped from the
+# artifact once its build is identical to production (docs merged) or the
+# docs branch no longer exists, so /preview/ disappears without a manual
+# step. One concurrency group for all refs keeps deploys queued.
 concurrency:
-  group: "pages-${{ github.ref }}"
+  group: "pages"
   cancel-in-progress: false
 
 jobs:
@@ -23,8 +29,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -35,16 +39,39 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
 
-      - name: Build docs
-        run: uv run mkdocs build
-
-      - name: Configure preview path
-        if: github.ref == 'refs/heads/docs'
+      - name: Check for preview branch
+        id: preview
         run: |
-          mkdir -p _site/preview
-          cp -a site/. _site/preview/
-          rm -rf site
-          mv _site site
+          if git ls-remote --exit-code --heads origin docs > /dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout production docs (master)
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          path: prod
+
+      - name: Checkout preview docs (docs branch)
+        if: steps.preview.outputs.exists == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: docs
+          path: preview
+
+      - name: Build production docs into site root
+        run: uv run mkdocs build -f prod/mkdocs.yml -d "$PWD/site"
+
+      - name: Build preview docs into site/preview
+        if: steps.preview.outputs.exists == 'true'
+        run: |
+          uv run mkdocs build -f preview/mkdocs.yml -d "$PWD/site/preview"
+          if diff -r --brief --exclude=preview site site/preview; then
+            rm -rf site/preview
+            echo "Preview matches production; dropped from this deployment."
+          fi
 
       - uses: actions/upload-pages-artifact@v5
         with:
