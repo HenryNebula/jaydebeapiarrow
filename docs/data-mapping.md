@@ -15,7 +15,9 @@ JayDeBeApiArrow converts JDBC data types through two stages: **JDBC to Arrow** (
 | `BOOLEAN` / `BIT` | `Boolean` | `bool` | |
 | `FLOAT` / `REAL` | `Float32` | `float` | |
 | `DOUBLE` | `Float64` | `float` | |
-| `DECIMAL` / `NUMERIC` | `Decimal128` | `decimal.Decimal` | Full precision preserved |
+| `DECIMAL` / `NUMERIC` (precision up to 38) | `Decimal128` | `decimal.Decimal` | Full precision preserved |
+| `DECIMAL` / `NUMERIC` (precision 39-76) | `Decimal256` | `decimal.Decimal` | Full precision preserved |
+| `DECIMAL` / `NUMERIC` (precision above 76, or unbounded) | `Utf8` | `decimal.Decimal` | String fallback; see [High-Precision Decimals](#high-precision-decimals) |
 
 ### String Types
 
@@ -74,6 +76,18 @@ These types are **not natively supported** by the Arrow JDBC adapter. They are c
 - **`ROWID`** - Returned as string.
 - **`OTHER`** - Returned as string. Columns with type names containing `JSON`, `UUID`, or `XML` are auto-detected and mapped to `VARCHAR`.
 - **`TIME_WITH_TIMEZONE`** - Not natively supported. Falls back to string representation.
+
+### High-Precision Decimals
+
+`DECIMAL` / `NUMERIC` columns are mapped by declared precision:
+
+- Up to 38 digits: Arrow `decimal128`
+- 39 to 76 digits: Arrow `decimal256`
+- Above 76 digits, or with no declared precision (e.g. PostgreSQL `numeric`): transferred as `Utf8`, because no Arrow decimal type can hold the value
+
+String-fallback columns carry `jdbc_type` / `jdbc_precision` / `jdbc_scale` field metadata. All fetch paths restore exact `decimal.Decimal` values from these strings, so decimals round-trip with full precision at any width. In the Arrow-native paths (`fetch_arrow_batches`, `fetch_arrow_table`) fallback columns stay `utf8` with the metadata attached; `fetch_arrow_table` additionally casts a column back to `decimal256` when the returned data fits within 76 digits.
+
+Known gap: unbounded decimals nested inside `DECIMAL` ARRAY columns bypass the string fallback ([#121](https://github.com/HenryNebula/jaydebeapiarrow/issues/121)).
 
 ### Driver-Specific Quirks
 
