@@ -42,7 +42,8 @@ from jaydebeapiarrow.lib.arrow_utils import \
     read_rows_from_arrow_iterator, \
     create_pyarrow_batches_from_list, \
     add_pyarrow_batches_to_statement, \
-    fetch_next_batch
+    fetch_next_batch, \
+    _import_batch_via_cdata
 
 
 def _is_jvm_started():
@@ -1178,6 +1179,10 @@ class Cursor(object):
             This is significantly faster (3-4x) than fetchall() for Arrow-native workflows
             because it avoids converting to Python tuples.
 
+            Batches are imported zero-copy through the Arrow C Data
+            Interface, so every Arrow type the JVM produces is supported,
+            including ARRAY columns and decimal256.
+
             DECIMAL/NUMERIC columns beyond decimal256 capacity (declared
             precision > 76, or unbounded numerics) arrive as utf8 carrying
             jdbc_type/jdbc_precision/jdbc_scale field metadata, so consumers
@@ -1193,7 +1198,12 @@ class Cursor(object):
             while it.hasNext():
                 root = it.next()
                 try:
-                    batch = pa.jvm.record_batch(root)
+                    # Zero-copy C Data Interface import. Unlike the
+                    # pa.jvm bridge (primitive vectors only), this
+                    # supports every Arrow type the Java side produces —
+                    # including ARRAY (ListVector) and decimal256 columns
+                    # (issue #125).
+                    batch = _import_batch_via_cdata(root)
                     fallback = _decimal_fallback_indexes(
                         batch.schema, self._jdbc_decimal_info())
                     if fallback:
@@ -1240,22 +1250,30 @@ class Cursor(object):
         fallback = _decimal_fallback_indexes(
             table.schema, self._jdbc_decimal_info())
         for index in fallback:
-            if pa.types.is_list(table.schema.field(index).type):
-                # DECIMAL ARRAY fallback: leave elements as strings until
-                # ARRAY columns work on the Arrow paths (#125).
-                continue
+            old_field = table.schema.field(index)
             column = table.column(index)
-            max_digits, max_scale = _infer_decimal_widths(
-                value for chunk in column.chunks for value in chunk.to_pylist())
+            if pa.types.is_list(old_field.type):
+                # DECIMAL ARRAY fallback: scan the string elements, then
+                # cast the child utf8 -> decimal256 when they all fit.
+                elements = (value
+                            for chunk in column.chunks
+                            for row in chunk.to_pylist() if row is not None
+                            for value in row if value is not None)
+            else:
+                elements = (value for chunk in column.chunks
+                            for value in chunk.to_pylist())
+            max_digits, max_scale = _infer_decimal_widths(elements)
             if max_digits > 76:
                 continue
-            target = pa.decimal256(max(max_digits, 1), max_scale)
+            if pa.types.is_list(old_field.type):
+                target = pa.list_(pa.decimal256(max(max_digits, 1), max_scale))
+            else:
+                target = pa.decimal256(max(max_digits, 1), max_scale)
             try:
                 casted = column.cast(target)
             except (pa.ArrowInvalid, pa.ArrowNotImplementedError):
                 continue
             jdbc_type, precision, scale = fallback[index]
-            old_field = table.schema.field(index)
             field = pa.field(
                 old_field.name, target, nullable=old_field.nullable,
                 metadata=_decimal_field_metadata(jdbc_type, precision, scale))
@@ -1293,9 +1311,17 @@ class Cursor(object):
             # Positional access: column names may repeat. isetitem replaces
             # the column wholesale (needed for the modern str dtype); pandas
             # < 1.5 falls back to iloc assignment, where string columns are
-            # still object dtype.
-            column = df.iloc[:, index].map(
-                lambda v: Decimal(v) if isinstance(v, str) else v)
+            # still object dtype. Decimal ARRAY columns arrive as lists of
+            # strings; rebuild each element.
+            def to_decimal(v):
+                if isinstance(v, str):
+                    return Decimal(v)
+                if isinstance(v, list):
+                    return [Decimal(e) if isinstance(e, str) else e
+                            for e in v]
+                return v
+
+            column = df.iloc[:, index].map(to_decimal)
             if hasattr(df, 'isetitem'):
                 df.isetitem(index, column)
             else:

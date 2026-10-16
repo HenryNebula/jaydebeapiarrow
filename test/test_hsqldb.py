@@ -281,6 +281,20 @@ class HsqldbArrayTypeTest(unittest.TestCase):
         self.assertEqual(result[0], [10, 20, 30])
         self.assertEqual(result[1], ["foo", "bar", "baz"])
 
+    def test_int_array_arrow_paths(self):
+        """ARRAY columns work on the Arrow-native paths via the C Data
+        Interface (issue #125: the pa.jvm bridge rejected ListVector)."""
+        import pyarrow as pa
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT int_vals FROM test_arrays WHERE id = 1")
+            table = cursor.fetch_arrow_table()
+            self.assertTrue(pa.types.is_list(table.schema.field(0).type))
+            self.assertEqual(table.column(0).to_pylist(), [[10, 20, 30]])
+
+            cursor.execute("SELECT int_vals FROM test_arrays WHERE id = 1")
+            batch = next(cursor.fetch_arrow_batches())
+            self.assertEqual(batch.column(0).to_pylist(), [[10, 20, 30]])
+
 
 class HsqldbDecimalArrayTest(unittest.TestCase):
     """DECIMAL ARRAY columns ride the unbounded-decimal string fallback:
@@ -366,6 +380,84 @@ class HsqldbDecimalArrayTest(unittest.TestCase):
                 "SELECT dec_vals FROM test_dec_arrays WHERE id = 1")
             rows = cursor.fetchall()
         self.assertEqual(rows, [( [Decimal('1.5000'), Decimal('2.2500')], )])
+
+    def test_decimal_array_arrow_table_casts_to_decimal256(self):
+        """fetch_arrow_table returns list<decimal256> for decimal arrays
+        whose elements fit, with jdbc metadata attached (issue #125)."""
+        import pyarrow as pa
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT dec_vals FROM test_dec_arrays WHERE id = 1")
+            table = cursor.fetch_arrow_table()
+        field = table.schema.field(0)
+        self.assertTrue(pa.types.is_list(field.type))
+        self.assertTrue(pa.types.is_decimal256(field.type.value_type))
+        self.assertEqual(field.metadata.get(b"jdbc_type"), b"DECIMAL ARRAY")
+        self.assertEqual(
+            table.column(0).to_pylist(),
+            [[Decimal('1.5000'), Decimal('2.2500')]])
+
+    def test_decimal_array_arrow_batches_keep_utf8_elements(self):
+        """Raw batches expose the fallback as list<utf8> plus jdbc
+        metadata, so consumers can cast deliberately (issue #125)."""
+        import pyarrow as pa
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT dec_vals FROM test_dec_arrays WHERE id = 1")
+            batch = next(cursor.fetch_arrow_batches())
+        field = batch.schema.field(0)
+        self.assertTrue(pa.types.is_list(field.type))
+        self.assertTrue(pa.types.is_string(field.type.value_type))
+        self.assertEqual(field.metadata.get(b"jdbc_type"), b"DECIMAL ARRAY")
+        self.assertEqual(batch.column(0).to_pylist(), [["1.5000", "2.2500"]])
+
+    def test_beyond_decimal256_array_stays_utf8_in_table(self):
+        """Elements beyond 76 digits keep utf8 elements in fetch_arrow_table
+        (same contract as singular fallback columns)."""
+        import pyarrow as pa
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT unbounded_vals FROM test_dec_arrays WHERE id = 2")
+            table = cursor.fetch_arrow_table()
+        field = table.schema.field(0)
+        self.assertTrue(pa.types.is_list(field.type))
+        self.assertTrue(pa.types.is_string(field.type.value_type))
+        self.assertEqual(table.column(0).to_pylist(), [[self.BIG]])
+
+    def test_decimal_array_multi_batch_zero_copy_integrity(self):
+        """Batches are imported zero-copy over the C Data Interface;
+        earlier batches must stay intact while later ones stream (#125)."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "CREATE TABLE t_dec_mb (id INT, dec_vals DECIMAL(20,4) ARRAY)")
+            # 2100 rows -> 3 batches at the default batch size of 1024
+            for i in range(2100):
+                cursor.execute(
+                    "INSERT INTO t_dec_mb VALUES (?, "
+                    "ARRAY[CAST(? AS DECIMAL(20,4)), "
+                    "CAST(? AS DECIMAL(20,4))])",
+                    (i, Decimal(i) / 4, Decimal(i) + Decimal('0.5')))
+            cursor.execute("SELECT id, dec_vals FROM t_dec_mb ORDER BY id")
+            table = cursor.fetch_arrow_table()
+        self.assertEqual(table.num_rows, 2100)
+        values = table.column(1).to_pylist()
+        for i in (0, 1, 1023, 1024, 2047, 2048, 2099):
+            self.assertEqual(
+                values[i], [Decimal(i) / 4, Decimal(i) + Decimal('0.5')])
+
+    def test_decimal_array_fetch_df(self):
+        """fetch_df rebuilds Decimal elements inside list columns."""
+        try:
+            import pandas  # noqa: F401
+        except ImportError:
+            self.skipTest("pandas not installed")
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT dec_vals FROM test_dec_arrays WHERE id = 1")
+            df = cursor.fetch_df()
+        # pandas 3 stores list cells as object ndarrays; compare as lists
+        self.assertEqual(
+            list(df.iloc[0, 0]), [Decimal('1.5000'), Decimal('2.2500')])
 
 
 class HsqldbFetchPerformanceTest(unittest.TestCase):
