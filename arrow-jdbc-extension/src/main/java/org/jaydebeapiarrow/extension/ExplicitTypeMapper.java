@@ -10,16 +10,6 @@ import org.apache.arrow.adapter.jdbc.JdbcFieldInfo;
 public class ExplicitTypeMapper {
 
     private static final Logger logger = Logger.getLogger(ExplicitTypeMapper.class.getName());
-    private int defaultDecimalPrecision = 38;
-    private int defaultDecimalScale = 17;
-
-    public ExplicitTypeMapper() {
-    }
-
-    public ExplicitTypeMapper(int defaultDecimalPrecision, int defaultDecimalScale) {
-        this.defaultDecimalScale = defaultDecimalScale;
-        this.defaultDecimalPrecision = defaultDecimalPrecision;
-    }
 
 
     static Map<Integer, List<Integer>> parseMetaData(ResultSet resultSet) throws SQLException {
@@ -70,11 +60,8 @@ public class ExplicitTypeMapper {
 
     private JdbcFieldInfo createDefaultDecimalFieldInfo(int precision, int scale) {
         if (precision < 1) {
-            return new JdbcFieldInfo(
-                    Types.DECIMAL,
-                    defaultDecimalPrecision,
-                    defaultDecimalScale
-                    );
+            // No declared precision (unbounded numeric): transfer as strings.
+            return new JdbcFieldInfo(Types.VARCHAR);
         }
         else {
             return new JdbcFieldInfo(
