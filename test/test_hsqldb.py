@@ -282,6 +282,92 @@ class HsqldbArrayTypeTest(unittest.TestCase):
         self.assertEqual(result[1], ["foo", "bar", "baz"])
 
 
+class HsqldbDecimalArrayTest(unittest.TestCase):
+    """DECIMAL ARRAY columns ride the unbounded-decimal string fallback:
+    element precision/scale are unknowable from ResultSetMetaData, so
+    elements transfer as utf8 strings and are rebuilt as Decimal on the
+    Python side (issue #121). Previously any DECIMAL ARRAY column failed
+    the whole query with IllegalArgumentException."""
+
+    BIG = ('1234567890123456789012345678901234567890'
+           '1234567890123456789012345678901234567890')  # 82 digits > 76
+
+    def setUp(self):
+        self.conn = jaydebeapiarrow.connect(
+            'org.hsqldb.jdbcDriver', 'jdbc:hsqldb:mem:decarraytest',
+            ['SA', ''],
+            jvm_args=_SUPPRESS_LOGGING_ARGS)
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "CREATE TABLE test_dec_arrays ("
+                "  id INT, "
+                "  dec_vals DECIMAL(20,4) ARRAY, "
+                "  unbounded_vals DECIMAL ARRAY)")
+            cursor.execute(
+                "INSERT INTO test_dec_arrays VALUES ("
+                "  1, "
+                "  ARRAY[1.50, 2.25], "
+                "  ARRAY[10, 20])")
+            cursor.execute(
+                "INSERT INTO test_dec_arrays VALUES ("
+                f"  2, ARRAY[99.9999], ARRAY[{self.BIG}])")
+            cursor.execute("INSERT INTO test_dec_arrays VALUES (3, NULL, NULL)")
+            cursor.execute(
+                "INSERT INTO test_dec_arrays VALUES (4, ARRAY[NULL, 5.5000], NULL)")
+
+    def tearDown(self):
+        with self.conn.cursor() as cursor:
+            cursor.execute("DROP TABLE test_dec_arrays IF EXISTS")
+        self.conn.close()
+
+    def test_decimal_array_elements_are_decimal(self):
+        """Fractional elements round-trip exactly, with scale preserved."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT dec_vals FROM test_dec_arrays WHERE id = 1")
+            result = cursor.fetchone()
+        self.assertIsInstance(result[0], list)
+        self.assertEqual(result[0], [Decimal('1.5000'), Decimal('2.2500')])
+        self.assertTrue(all(isinstance(v, Decimal) for v in result[0]))
+
+    def test_unbounded_decimal_array_small_values(self):
+        """A bare DECIMAL ARRAY no longer fails the query; elements come
+        back as Decimal (HSQLDB stores bare DECIMAL elements at scale 0)."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT unbounded_vals FROM test_dec_arrays WHERE id = 1")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], [Decimal('10'), Decimal('20')])
+
+    def test_unbounded_decimal_array_beyond_decimal256(self):
+        """Elements beyond decimal256's 76 digits ride the string fallback
+        and are restored to exact Decimals."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT unbounded_vals FROM test_dec_arrays WHERE id = 2")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], [Decimal(self.BIG)])
+
+    def test_null_array_and_null_elements(self):
+        """NULL arrays stay None; NULL elements inside arrays stay None."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT dec_vals, unbounded_vals FROM test_dec_arrays "
+                "WHERE id IN (3, 4) ORDER BY id")
+            nulls, with_null_element = cursor.fetchall()
+        self.assertIsNone(nulls[0])
+        self.assertIsNone(nulls[1])
+        self.assertEqual(with_null_element[0], [None, Decimal('5.5000')])
+
+    def test_fetchall_decimal_array(self):
+        """fetchall restores Decimal elements across every row."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT dec_vals FROM test_dec_arrays WHERE id = 1")
+            rows = cursor.fetchall()
+        self.assertEqual(rows, [( [Decimal('1.5000'), Decimal('2.2500')], )])
+
+
 class HsqldbFetchPerformanceTest(unittest.TestCase):
     """Relative speed vs the row-by-row JPype path (original jaydebeapi),
     on small in-memory tables: only the ratio is asserted, never an

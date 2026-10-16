@@ -693,15 +693,34 @@ def _decimal_field_metadata(jdbc_type_name, precision, scale):
     }
 
 
+def _is_decimal_array_type_name(type_name):
+    """True for JDBC ARRAY type names whose elements are DECIMAL/NUMERIC.
+    Mirrors ExplicitTypeMapper.inferElementJdbcType's decimal branch, which
+    routes these to VARCHAR elements (element precision is unknowable)."""
+    upper = type_name.upper().strip()
+    return ("DECIMAL ARRAY" in upper or "NUMERIC ARRAY" in upper
+            or upper in ("DECIMAL[]", "NUMERIC[]", "_NUMERIC", "_DECIMAL"))
+
+
 def _decimal_fallback_indexes(schema, decimal_meta):
     """Map schema field index -> (jdbc_type_name, precision, scale) for
-    fields that arrived as utf8 but were DECIMAL/NUMERIC in JDBC metadata."""
+    fields that arrived as utf8 (or list<utf8> for DECIMAL arrays) but were
+    DECIMAL/NUMERIC in JDBC metadata."""
     import pyarrow as pa
+
+    def is_stringy(dtype):
+        return (pa.types.is_string(dtype)
+                or pa.types.is_large_string(dtype))
+
     fallback = {}
     for index, jdbc_type_name, precision, scale in decimal_meta:
         if index < len(schema):
             dtype = schema.field(index).type
-            if pa.types.is_string(dtype) or pa.types.is_large_string(dtype):
+            if is_stringy(dtype):
+                fallback[index] = (jdbc_type_name, precision, scale)
+            elif (pa.types.is_list(dtype)
+                    and is_stringy(dtype.value_type)):
+                # DECIMAL ARRAY transferred with utf8 elements (#121)
                 fallback[index] = (jdbc_type_name, precision, scale)
     return fallback
 
@@ -1008,26 +1027,35 @@ class Cursor(object):
 
     def _jdbc_decimal_info(self):
         """Cached (0-based index, jdbc type name, precision, scale) tuples
-        for the result set's DECIMAL/NUMERIC columns."""
+        for the result set's DECIMAL/NUMERIC columns, plus DECIMAL ARRAY
+        columns (whose elements transfer as strings; precision/scale are
+        unknowable for array elements, so 0/0 is reported)."""
         if self._decimal_info is None:
             rows = []
             if self._meta is not None:
                 import jpype
                 types = jpype.java.sql.Types
                 decimal_consts = (int(types.DECIMAL), int(types.NUMERIC))
+                array_const = int(types.ARRAY)
                 m = self._meta
                 for col in range(1, m.getColumnCount() + 1):
-                    if int(m.getColumnType(col)) in decimal_consts:
+                    jdbc_type = int(m.getColumnType(col))
+                    type_name = str(m.getColumnTypeName(col))
+                    if jdbc_type in decimal_consts:
                         rows.append((col - 1,
-                                     str(m.getColumnTypeName(col)),
+                                     type_name,
                                      int(m.getPrecision(col)),
                                      int(m.getScale(col))))
+                    elif (jdbc_type == array_const
+                            and _is_decimal_array_type_name(type_name)):
+                        rows.append((col - 1, type_name, 0, 0))
             self._decimal_info = tuple(rows)
         return self._decimal_info
 
     def _restore_decimal_columns(self, rows, schema=None):
         """Rebuild Decimals for DECIMAL/NUMERIC columns that arrived as
-        UTF-8 strings (beyond decimal256 capacity, or unbounded precision)."""
+        UTF-8 strings (beyond decimal256 capacity, or unbounded precision),
+        including elements of DECIMAL ARRAY columns (#121)."""
         if self._decimal_cols is None and schema is not None:
             # Detect once from the batch schema — the ground truth of what
             # the Java type mapping produced — instead of sniffing values,
@@ -1044,6 +1072,9 @@ class Cursor(object):
                 v = row[i]
                 if isinstance(v, str):
                     row[i] = Decimal(v)
+                elif isinstance(v, list):
+                    row[i] = [Decimal(e) if isinstance(e, str) else e
+                              for e in v]
             out.append(tuple(row))
         return out
 
@@ -1209,6 +1240,10 @@ class Cursor(object):
         fallback = _decimal_fallback_indexes(
             table.schema, self._jdbc_decimal_info())
         for index in fallback:
+            if pa.types.is_list(table.schema.field(index).type):
+                # DECIMAL ARRAY fallback: leave elements as strings until
+                # ARRAY columns work on the Arrow paths (#125).
+                continue
             column = table.column(index)
             max_digits, max_scale = _infer_decimal_widths(
                 value for chunk in column.chunks for value in chunk.to_pylist())

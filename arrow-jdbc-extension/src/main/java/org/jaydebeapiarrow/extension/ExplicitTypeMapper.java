@@ -263,8 +263,15 @@ public class ExplicitTypeMapper {
             return new JdbcFieldInfo(Types.VARCHAR);
         }
         if (upper.contains("DECIMAL ARRAY") || upper.contains("NUMERIC ARRAY")
-                || upper.equals("DECIMAL[]") || upper.equals("NUMERIC[]")) {
-            return new JdbcFieldInfo(Types.DECIMAL);
+                || upper.equals("DECIMAL[]") || upper.equals("NUMERIC[]")
+                || upper.equals("_NUMERIC") || upper.equals("_DECIMAL")) {
+            // Element precision/scale is unknowable from ResultSetMetaData
+            // for ARRAY columns, so decimal elements are always unbounded
+            // here: transfer them as strings, mirroring the unbounded
+            // top-level policy in createDefaultDecimalFieldInfo(). A bare
+            // JdbcFieldInfo(Types.DECIMAL) would also throw — DECIMAL
+            // requires precision and scale. See issue #121.
+            return new JdbcFieldInfo(Types.VARCHAR);
         }
         if (upper.contains("DATE ARRAY") || upper.equals("DATE[]")) {
             return new JdbcFieldInfo(Types.DATE);
