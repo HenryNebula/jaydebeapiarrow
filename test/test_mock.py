@@ -209,6 +209,38 @@ class MockTest(unittest.TestCase):
         self.assertEqual(
             result[0], Decimal("12345678901234567890.123456789012345678901234567890"))
 
+    def test_fetch_arrow_table_decimal256_native(self):
+        """Declared 39-76 digit decimals flow as decimal256 through
+        fetch_arrow_table (issue #125: pyarrow's JVM bridge mapped every
+        Decimal to decimal128 and raised on precision > 38)."""
+        import pyarrow as pa
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        value = BigDecimal("12345678901234567890.123456789012345678901234567890")
+        self.conn.jconn.mockSingleRowDecimalResult(value, 50, 30)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            table = cursor.fetch_arrow_table()
+        self.assertTrue(pa.types.is_decimal256(table.schema.field(0).type))
+        self.assertEqual(
+            table.column(0).to_pylist(),
+            [Decimal("12345678901234567890.123456789012345678901234567890")])
+
+    def test_fetch_arrow_batches_decimal256_native(self):
+        """fetch_arrow_batches carries decimal256 natively too (issue #125)."""
+        import pyarrow as pa
+        import jpype
+        BigDecimal = jpype.JClass("java.math.BigDecimal")
+        value = BigDecimal("12345678901234567890.123456789012345678901234567890")
+        self.conn.jconn.mockSingleRowDecimalResult(value, 50, 30)
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            batch = next(cursor.fetch_arrow_batches())
+        self.assertTrue(pa.types.is_decimal256(batch.schema.field(0).type))
+        self.assertEqual(
+            batch.column(0).to_pylist(),
+            [Decimal("12345678901234567890.123456789012345678901234567890")])
+
     def test_numeric_1000_scale_64_small_value_round_trips(self):
         """Issue #119: NUMERIC(1000, 64) columns crashed with
         UnsupportedOperationException 'Decimal size greater than 16 bytes'.

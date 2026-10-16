@@ -616,3 +616,27 @@ class PropertiesDriverArgsPassingTest(unittest.TestCase):
                                      {'user': 'SA', 'password': '' } )
         c = _connect(driver, url, driver_args)
         c.close()
+
+
+class DecimalArrayTypeNameTest(unittest.TestCase):
+    """_is_decimal_array_type_name mirrors the Java side's decimal-ARRAY
+    element patterns (ExplicitTypeMapper.inferElementJdbcType), which route
+    these arrays onto the unbounded-decimal string fallback (#121)."""
+
+    def test_matches_decimal_array_names(self):
+        for name in ("DECIMAL ARRAY", "NUMERIC ARRAY",
+                     "decimal array", "Decimal ARRAY",
+                     "DECIMAL[]", "NUMERIC[]"):
+            self.assertTrue(
+                jaydebeapiarrow._is_decimal_array_type_name(name), name)
+
+    def test_matches_postgres_underscore_names(self):
+        for name in ("_numeric", "_decimal", "_NUMERIC"):
+            self.assertTrue(
+                jaydebeapiarrow._is_decimal_array_type_name(name), name)
+
+    def test_rejects_non_decimal_array_names(self):
+        for name in ("_int4", "_varchar", "INTEGER ARRAY", "INT[]",
+                     "_text", "VARCHAR ARRAY", "_float8", "_bool"):
+            self.assertFalse(
+                jaydebeapiarrow._is_decimal_array_type_name(name), name)

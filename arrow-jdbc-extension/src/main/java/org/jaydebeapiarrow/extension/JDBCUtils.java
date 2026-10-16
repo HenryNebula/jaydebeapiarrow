@@ -67,7 +67,7 @@ public class JDBCUtils {
      * Python takes ownership of the C data and will call the release callbacks.
      */
     public static long[] exportNextBatch(VectorSchemaRoot root) throws Exception {
-        BufferAllocator allocator = AllocatorSingleton.getChildAllocator();
+        BufferAllocator allocator = AllocatorSingleton.getExportAllocator();
         ArrowArray arrowArray = ArrowArray.allocateNew(allocator);
         ArrowSchema arrowSchema = ArrowSchema.allocateNew(allocator);
         Data.exportVectorSchemaRoot(allocator, root, null, arrowArray, arrowSchema);
