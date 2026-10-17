@@ -87,7 +87,7 @@ These types are **not natively supported** by the Arrow JDBC adapter. They are c
 
 String-fallback columns carry `jdbc_type` / `jdbc_precision` / `jdbc_scale` field metadata. All fetch paths restore exact `decimal.Decimal` values from these strings, so decimals round-trip with full precision at any width. In the Arrow-native paths (`fetch_arrow_batches`, `fetch_arrow_table`) fallback columns stay `utf8` with the metadata attached; `fetch_arrow_table` additionally casts a column back to `decimal256` when the returned data fits within 76 digits.
 
-Known gap: unbounded decimals nested inside `DECIMAL` ARRAY columns bypass the string fallback ([#121](https://github.com/HenryNebula/jaydebeapiarrow/issues/121)).
+`DECIMAL` / `NUMERIC` ARRAY columns use the same fallback: element precision is not available from JDBC metadata, so elements always transfer as strings. The row fetch paths (`fetchone`, `fetchmany`, `fetchall`) restore every element to an exact `decimal.Decimal` — including values beyond decimal256 — and preserve NULL arrays and NULL elements ([#121](https://github.com/HenryNebula/jaydebeapiarrow/issues/121)). On the Arrow-native paths, decimal arrays arrive as `list<utf8>` with `jdbc_type` field metadata; `fetch_arrow_table` casts the elements back to `decimal256` when they fit within 76 digits, and `fetch_df` rebuilds `decimal.Decimal` elements ([#125](https://github.com/HenryNebula/jaydebeapiarrow/issues/125)).
 
 ### Driver-Specific Quirks
 

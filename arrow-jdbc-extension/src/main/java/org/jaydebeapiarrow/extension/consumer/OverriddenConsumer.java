@@ -49,10 +49,13 @@ public class OverriddenConsumer {
             case Types.NUMERIC:
                 int precision = fieldInfo.getPrecision();
                 int scale = fieldInfo.getScale();
-                // Unbounded precision only reaches this branch when it
-                // bypasses ExplicitTypeMapper's VARCHAR mapping (e.g.
-                // DECIMAL array elements); see issue #121.
-                if (precision <= 0) precision = 38;
+                // No declared precision (unbounded/unknown): transfer as
+                // utf8, mirroring ExplicitTypeMapper's unbounded-decimal
+                // policy; the Python side rebuilds exact Decimals from the
+                // strings. See issue #121.
+                if (precision <= 0) {
+                    return new ArrowType.Utf8();
+                }
                 if (scale < 0) scale = 0;
                 // Beyond decimal256's 76 digits, transfer as utf8; the
                 // Python side rebuilds exact Decimals from the strings.
