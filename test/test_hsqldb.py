@@ -459,6 +459,24 @@ class HsqldbDecimalArrayTest(unittest.TestCase):
         self.assertEqual(
             list(df.iloc[0, 0]), [Decimal('1.5000'), Decimal('2.2500')])
 
+    def test_beyond_decimal256_array_fetch_df(self):
+        """fetch_df rebuilds Decimal elements even when they exceed
+        decimal256 and stay utf8 through the table cast (#121). pandas 3
+        hands list cells back as ndarrays, which the rebuild must handle."""
+        try:
+            import pandas  # noqa: F401
+        except ImportError:
+            self.skipTest("pandas not installed")
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT unbounded_vals FROM test_dec_arrays WHERE id = 2")
+            df = cursor.fetch_df()
+        cell = df.iloc[0, 0]
+        self.assertEqual(list(cell), [Decimal(self.BIG)])
+        self.assertTrue(
+            all(isinstance(e, Decimal) for e in cell),
+            f"elements must be Decimal, got {[type(e).__name__ for e in cell]}")
+
 
 class HsqldbFetchPerformanceTest(unittest.TestCase):
     """Relative speed vs the row-by-row JPype path (original jaydebeapi),
