@@ -461,7 +461,7 @@ class HsqldbDecimalArrayTest(unittest.TestCase):
 
     def test_beyond_decimal256_array_fetch_df(self):
         """fetch_df rebuilds Decimal elements even when they exceed
-        decimal256 and stay utf8 through the table cast (#121). pandas 3
+        decimal256 and stay utf8 through the table cast (#121). to_pandas()
         hands list cells back as ndarrays, which the rebuild must handle."""
         try:
             import pandas  # noqa: F401
