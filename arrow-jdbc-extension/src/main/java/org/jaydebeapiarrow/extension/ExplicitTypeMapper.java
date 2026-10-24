@@ -10,16 +10,6 @@ import org.apache.arrow.adapter.jdbc.JdbcFieldInfo;
 public class ExplicitTypeMapper {
 
     private static final Logger logger = Logger.getLogger(ExplicitTypeMapper.class.getName());
-    private int defaultDecimalPrecision = 38;
-    private int defaultDecimalScale = 17;
-
-    public ExplicitTypeMapper() {
-    }
-
-    public ExplicitTypeMapper(int defaultDecimalPrecision, int defaultDecimalScale) {
-        this.defaultDecimalScale = defaultDecimalScale;
-        this.defaultDecimalPrecision = defaultDecimalPrecision;
-    }
 
 
     static Map<Integer, List<Integer>> parseMetaData(ResultSet resultSet) throws SQLException {
@@ -70,11 +60,8 @@ public class ExplicitTypeMapper {
 
     private JdbcFieldInfo createDefaultDecimalFieldInfo(int precision, int scale) {
         if (precision < 1) {
-            return new JdbcFieldInfo(
-                    Types.DECIMAL,
-                    defaultDecimalPrecision,
-                    defaultDecimalScale
-                    );
+            // No declared precision (unbounded numeric): transfer as strings.
+            return new JdbcFieldInfo(Types.VARCHAR);
         }
         else {
             return new JdbcFieldInfo(
@@ -276,8 +263,15 @@ public class ExplicitTypeMapper {
             return new JdbcFieldInfo(Types.VARCHAR);
         }
         if (upper.contains("DECIMAL ARRAY") || upper.contains("NUMERIC ARRAY")
-                || upper.equals("DECIMAL[]") || upper.equals("NUMERIC[]")) {
-            return new JdbcFieldInfo(Types.DECIMAL);
+                || upper.equals("DECIMAL[]") || upper.equals("NUMERIC[]")
+                || upper.equals("_NUMERIC") || upper.equals("_DECIMAL")) {
+            // Element precision/scale is unknowable from ResultSetMetaData
+            // for ARRAY columns, so decimal elements are always unbounded
+            // here: transfer them as strings, mirroring the unbounded
+            // top-level policy in createDefaultDecimalFieldInfo(). A bare
+            // JdbcFieldInfo(Types.DECIMAL) would also throw — DECIMAL
+            // requires precision and scale. See issue #121.
+            return new JdbcFieldInfo(Types.VARCHAR);
         }
         if (upper.contains("DATE ARRAY") || upper.equals("DATE[]")) {
             return new JdbcFieldInfo(Types.DATE);

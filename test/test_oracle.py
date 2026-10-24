@@ -69,9 +69,11 @@ class OracleTest(IntegrationTestBase, unittest.TestCase):
             result = cursor.fetchone()
         # Oracle JDBC quirks: NUMBER/INTEGER columns return BigDecimal with
         # full scale, and Oracle DATE maps to TIMESTAMP (includes time part).
+        # Untyped NUMBER reports JDBC precision 0 and is transferred as
+        # strings, so exact scale is preserved (Decimal equality ignores scale).
         exp = (
             self._cast_datetime('2010-01-26 14:31:59', r'%Y-%m-%d %H:%M:%S'),
-            Decimal('20.00000000000000000'),   # INTEGER → NUMERIC → Decimal(scale=17)
+            Decimal('20.00000000000000000'),   # INTEGER → NUMERIC (untyped) → exact Decimal
             Decimal('1.20'),                    # NUMBER(10,2) preserves scale
             Decimal('10.00'),                   # NUMBER(10,2) preserves scale
             dbl_col,
