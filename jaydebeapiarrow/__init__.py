@@ -1316,6 +1316,9 @@ class Cursor(object):
             def to_decimal(v):
                 if isinstance(v, str):
                     return Decimal(v)
+                if hasattr(v, "tolist"):
+                    # to_pandas() materializes list cells as ndarrays
+                    v = v.tolist()
                 if isinstance(v, list):
                     return [Decimal(e) if isinstance(e, str) else e
                             for e in v]
