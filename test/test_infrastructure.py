@@ -482,6 +482,163 @@ class DynamicClasspathMockTest(_DynamicClasspathTestBase, unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Externally started JVM tests (issue #128)
+# ---------------------------------------------------------------------------
+
+class ExternalJvmAutoloadTest(unittest.TestCase):
+    """connect() must work plug-and-play on a JVM the user started via raw
+    jpype.startJVM() with nothing on the classpath (issue #128)."""
+
+    def _run_in_subprocess(self, code, env=None):
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True, text=True, timeout=30,
+            cwd=os.path.dirname(os.path.dirname(__file__)),
+            env=env
+        )
+        return result.stdout.strip(), result.stderr.strip()
+
+    def _bare_env(self):
+        # No CLASSPATH so nothing leaks onto the JVM the test starts itself
+        return {k: v for k, v in os.environ.items() if k != 'CLASSPATH'}
+
+    def _hsqldb_jar(self):
+        jar_dir = os.path.join(_THIS_DIR, 'jars')
+        if not os.path.isdir(jar_dir):
+            self.skipTest('test/jars/ directory not found (run download_jdbc_drivers.sh)')
+        for f in os.listdir(jar_dir):
+            if 'hsqldb' in f.lower() and f.endswith('.jar'):
+                return os.path.join(jar_dir, f)
+        self.skipTest('HSQLDB JAR not found in test/jars/')
+
+    def test_autoload_on_externally_started_jvm(self):
+        """The issue #128 pattern: manual startJVM without classpath, then
+        connect(..., jars=...) with no experimental flag.  The driver jar
+        and the packaged Arrow extension must both load dynamically and a
+        full query round-trip must succeed."""
+        hsqldb_jar = self._hsqldb_jar()
+        code = f'''
+import jpype
+import jaydebeapiarrow
+
+jpype.startJVM(
+    jpype.getDefaultJVMPath(),
+    "--add-opens=java.base/java.nio=ALL-UNNAMED",
+    "--add-opens=java.base/java.lang=ALL-UNNAMED",
+    ignoreUnrecognized=True,
+    convertStrings=True,
+)
+
+conn = jaydebeapiarrow.connect(
+    "org.hsqldb.jdbcDriver",
+    "jdbc:hsqldb:mem:.",
+    ["SA", ""],
+    jars={repr(hsqldb_jar)},
+)
+cursor = conn.cursor()
+cursor.execute("CREATE TABLE t_autoload (id INTEGER, name VARCHAR(50))")
+cursor.execute("INSERT INTO t_autoload VALUES (1, 'hello'), (2, 'world')")
+cursor.execute("SELECT id, name FROM t_autoload ORDER BY id")
+rows = cursor.fetchall()
+cursor.close()
+conn.close()
+print(f"AUTOLOAD_OK: {{rows}}")
+'''
+        stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
+        self.assertEqual(stdout, "AUTOLOAD_OK: [(1, 'hello'), (2, 'world')]",
+                         f'Externally started JVM autoload failed.\n'
+                         f'stdout: {stdout}\nstderr: {stderr}')
+
+    def test_missing_add_opens_fails_fast(self):
+        """An externally started JVM without the Arrow --add-opens flags must
+        fail at connect() with guidance naming the required flag, not with a
+        confusing InaccessibleObjectException at first fetch.
+
+        JDK 16+ denies illegal access by default, so the fail-fast fires
+        there.  Older JDKs (8 has no JPMS, 9-15 default to
+        --illegal-access=permit) genuinely allow Arrow's reflection, so
+        connecting without the flags succeeds legitimately there."""
+        hsqldb_jar = self._hsqldb_jar()
+        code = f'''
+import jpype
+import jaydebeapiarrow
+
+jpype.startJVM(
+    jpype.getDefaultJVMPath(),
+    ignoreUnrecognized=True,
+    convertStrings=True,
+)
+
+# Ground truth for this JVM: is java.nio actually open to the unnamed
+# module holding the extension (no --add-opens passed)?
+urls = [jpype.java.io.File(j).toURI().toURL()
+        for j in jaydebeapiarrow._get_arrow_jar_paths()]
+loader = jpype.java.net.URLClassLoader(
+    urls, jpype.java.lang.ClassLoader.getSystemClassLoader())
+probe_open = jaydebeapiarrow._java_base_opens_nio(loader)
+print("PROBE_OPEN" if probe_open else "PROBE_CLOSED")
+
+try:
+    conn = jaydebeapiarrow.connect(
+        "org.hsqldb.jdbcDriver",
+        "jdbc:hsqldb:mem:.",
+        ["SA", ""],
+        jars={repr(hsqldb_jar)},
+    )
+    conn.close()
+    print("CONNECT_OK")
+except jaydebeapiarrow.InterfaceError as e:
+    if "--add-opens=java.base/java.nio" in str(e):
+        print("FAIL_FAST_OK")
+    else:
+        print(f"WRONG_INTERFACE_ERROR: {{e}}")
+except Exception as e:
+    print(f"OTHER_ERROR: {{type(e).__name__}}: {{e}}")
+'''
+        stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
+        # JDK 16+ denies by default -> fail fast with the flag named;
+        # JDK 8-15 permits by default -> connecting genuinely works.
+        self.assertIn(stdout, ['PROBE_CLOSED\nFAIL_FAST_OK',
+                               'PROBE_OPEN\nCONNECT_OK'],
+                      f'Missing --add-opens behavior wrong for this JVM.\n'
+                      f'stdout: {stdout}\nstderr: {stderr}')
+
+    def test_class_not_found_without_jars_names_the_fix(self):
+        """On a pre-started JVM, a driver class that is nowhere to be found
+        must raise an error pointing at jars= / the classpath."""
+        code = '''
+import jpype
+import jaydebeapiarrow
+
+jpype.startJVM(
+    jpype.getDefaultJVMPath(),
+    "--add-opens=java.base/java.nio=ALL-UNNAMED",
+    "--add-opens=java.base/java.lang=ALL-UNNAMED",
+    ignoreUnrecognized=True,
+    convertStrings=True,
+)
+
+try:
+    jaydebeapiarrow.connect(
+        "org.example.NonexistentDriver",
+        "jdbc:nonexistent://dummy",
+    )
+    print("UNEXPECTED_SUCCESS")
+except TypeError as e:
+    if "jars" in str(e) and "classpath" in str(e):
+        print("GUIDANCE_OK")
+    else:
+        print(f"PLAIN_ERROR: {{e}}")
+except Exception as e:
+    print(f"OTHER_ERROR: {{type(e).__name__}}: {{e}}")
+'''
+        stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
+        self.assertEqual(stdout, 'GUIDANCE_OK',
+                         f'Class-not-found error should include jars guidance.\n'
+                         f'stdout: {stdout}\nstderr: {stderr}')
+
+
+# ---------------------------------------------------------------------------
 # JPype reflection / type mapping tests (legacy #111)
 # ---------------------------------------------------------------------------
 
