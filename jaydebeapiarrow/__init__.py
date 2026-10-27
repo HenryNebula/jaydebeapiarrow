@@ -240,13 +240,17 @@ def _dynamic_load_driver(jclassname, jars):
     return url_cl
 
 
-# Cache for the extension's JDBCUtils class when it had to be loaded through
-# a URLClassLoader (externally started JVM without the extension jar on the
-# classpath).  Guarded by _jdbc_utils_lock so concurrent connect() calls
-# produce exactly one class identity — mixing classes from two loaders would
-# raise ClassCastException on the fetch path.
+# Cache for the extension's JDBCUtils class (and the loader that produced
+# it) when it had to be loaded through a URLClassLoader (externally started
+# JVM without the extension jar on the classpath).  Guarded by
+# _jdbc_utils_lock so concurrent connect() calls produce exactly one class
+# identity — mixing classes from two loaders would raise ClassCastException
+# on the fetch path.  The loader is kept so the java.nio module-open check
+# keeps probing the class's own module on every connect(), not just the
+# first.
 _jdbc_utils_lock = threading.Lock()
 _jdbc_utils_dynamic_class = None
+_jdbc_utils_dynamic_loader = None
 
 
 def _java_base_opens_nio(loader=None):
@@ -285,7 +289,7 @@ def _resolve_jdbc_utils():
     boundary is static method calls plus raw C Data pointers, so handing
     arrow_utils the class object is sufficient.
     """
-    global _jdbc_utils_dynamic_class
+    global _jdbc_utils_dynamic_class, _jdbc_utils_dynamic_loader
     import jpype
     from jaydebeapiarrow.lib import arrow_utils
 
@@ -303,6 +307,9 @@ def _resolve_jdbc_utils():
                 _jdbc_utils_dynamic_class = jpype.JClass(
                     loader.loadClass(
                         "org.jaydebeapiarrow.extension.JDBCUtils"))
+                _jdbc_utils_dynamic_loader = loader
+            else:
+                loader = _jdbc_utils_dynamic_loader
             arrow_utils._jdbc_utils_class = _jdbc_utils_dynamic_class
 
     # Arrow's MemoryUtil cannot reflect on java.nio.Buffer.address unless

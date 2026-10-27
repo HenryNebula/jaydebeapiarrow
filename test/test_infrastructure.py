@@ -603,6 +603,52 @@ except Exception as e:
                       f'Missing --add-opens behavior wrong for this JVM.\n'
                       f'stdout: {stdout}\nstderr: {stderr}')
 
+    def test_fail_fast_consistent_on_retry(self):
+        """The --add-opens fail-fast must fire on every connect() call, not
+        just the first.  A retry after catching the InterfaceError (e.g. in a
+        connection-retry loop) must raise the same guidance again instead of
+        silently succeeding and dying at first fetch with the confusing
+        ExceptionInInitializerError the fail-fast exists to prevent."""
+        hsqldb_jar = self._hsqldb_jar()
+        code = f'''
+import jpype
+import jaydebeapiarrow
+
+jpype.startJVM(
+    jpype.getDefaultJVMPath(),
+    ignoreUnrecognized=True,
+    convertStrings=True,
+)
+
+def try_connect():
+    try:
+        conn = jaydebeapiarrow.connect(
+            "org.hsqldb.jdbcDriver",
+            "jdbc:hsqldb:mem:.",
+            ["SA", ""],
+            jars={repr(hsqldb_jar)},
+        )
+        conn.close()
+        return "CONNECT_OK"
+    except jaydebeapiarrow.InterfaceError as e:
+        if "--add-opens=java.base/java.nio" in str(e):
+            return "FAIL_FAST_OK"
+        return f"WRONG_INTERFACE_ERROR: {{e}}"
+    except Exception as e:
+        return f"OTHER_ERROR: {{type(e).__name__}}: {{e}}"
+
+print(f"FIRST={{try_connect()}} SECOND={{try_connect()}}")
+'''
+        stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
+        # Both calls must agree: fail fast twice on a denying JVM (16+),
+        # genuinely connect twice on a permissive one (8-15).
+        self.assertIn(
+            stdout,
+            ['FIRST=FAIL_FAST_OK SECOND=FAIL_FAST_OK',
+             'FIRST=CONNECT_OK SECOND=CONNECT_OK'],
+            f'Fail-fast inconsistent between first connect and retry.\n'
+            f'stdout: {stdout}\nstderr: {stderr}')
+
     def test_class_not_found_without_jars_names_the_fix(self):
         """On a pre-started JVM, a driver class that is nowhere to be found
         must raise an error pointing at jars= / the classpath."""
