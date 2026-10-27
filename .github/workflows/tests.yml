@@ -11,7 +11,9 @@ on:
 jobs:
   test:
 
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest now serves 26.04, whose setup-python manifest
+    # has no Python 3.9 build.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       checks: write
