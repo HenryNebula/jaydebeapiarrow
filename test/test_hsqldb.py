@@ -33,6 +33,24 @@ class HsqldbTest(IntegrationTestBase, unittest.TestCase):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert.sql'))
 
 
+class CursorDescriptionTest(unittest.TestCase):
+    """PEP 249 cursor.description conformance (issue #132)."""
+
+    def test_description_is_none_before_first_execute(self):
+        """A fresh cursor's description is None (PEP 249: "This attribute
+        will be None ... if the cursor has not executed an operation yet"),
+        not an AttributeError from a missing _meta attribute."""
+        conn = jaydebeapiarrow.connect('org.hsqldb.jdbcDriver',
+                                       'jdbc:hsqldb:mem:desc_before_execute',
+                                       ['SA', ''],
+                                       jvm_args=_SUPPRESS_LOGGING_ARGS)
+        try:
+            with conn.cursor() as cursor:
+                self.assertIsNone(cursor.description)
+        finally:
+            conn.close()
+
+
 class HsqldbMultipleConnectionsTest(unittest.TestCase):
     """Test that multiple sequential and simultaneous connections work (issue #97)."""
 

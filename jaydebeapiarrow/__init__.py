@@ -889,6 +889,7 @@ def _infer_decimal_widths(strings):
 class Cursor(object):
 
     _rs = None
+    _meta = None
     _description = None
     _iter = None
     _buffer = None
