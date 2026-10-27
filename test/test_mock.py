@@ -1018,6 +1018,12 @@ class MockTest(unittest.TestCase):
             cursor.execute("SELECT real_column AS alias_col FROM t")
             self.assertEqual(cursor.description[0][0], "alias_col")
 
+    def test_description_is_none_before_first_execute(self):
+        """PEP 249: cursor.description is None when the cursor has not yet
+        executed an operation — not an AttributeError (#132)."""
+        with self.conn.cursor() as cursor:
+            self.assertIsNone(cursor.description)
+
     def test_dbapi_type_other_maps_to_string(self):
         """JDBC OTHER should map to STRING type code."""
         import jpype
