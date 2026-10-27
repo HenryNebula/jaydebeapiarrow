@@ -173,6 +173,17 @@ def _handle_sql_exception_jpype():
     message = _build_java_exception_message(exc_val)
     reraise(exc_type, message, exc_info[2])
 
+# Cache for drivers loaded through a URLClassLoader, keyed by
+# (jclassname, jars).  The driver class lives in a child classloader, so
+# jpype.JClass(jclassname) keeps raising TypeError on every connect() —
+# without this cache each reconnect would build another URLClassLoader and
+# register another DriverShim with DriverManager, leaking both for the life
+# of the JVM (#134).  Guarded by _dynamic_driver_lock so concurrent
+# connect() calls produce exactly one loader/shim per key.
+_dynamic_driver_lock = threading.Lock()
+_dynamic_driver_loaders = {}
+
+
 def _dynamic_load_driver(jclassname, jars):
     """Load a JDBC driver from JARs after JVM start using the DriverShim pattern.
 
@@ -181,6 +192,10 @@ def _dynamic_load_driver(jclassname, jars):
     URLClassLoader for the new JARs, instantiating the driver through it, and
     registering a ``DriverShim`` proxy (loaded on the system classloader) with
     DriverManager.
+
+    Loaders are cached per (jclassname, jars): a repeat connect() with the
+    same driver reuses the existing loader and registered shim instead of
+    accumulating a new pair each call.
 
     Args:
         jclassname: Fully-qualified Java class name of the JDBC driver.
@@ -191,48 +206,55 @@ def _dynamic_load_driver(jclassname, jars):
     """
     import jpype
 
-    # Build URLClassLoader with the new JARs, parented to system classloader
-    urls = [jpype.java.io.File(j).toURI().toURL() for j in jars]
-    url_cl = jpype.java.net.URLClassLoader(
-        urls, jpype.java.lang.ClassLoader.getSystemClassLoader()
-    )
+    key = (jclassname, tuple(sorted(jars)))
+    with _dynamic_driver_lock:
+        url_cl = _dynamic_driver_loaders.get(key)
+        if url_cl is None:
+            # Build URLClassLoader with the new JARs, parented to system
+            # classloader
+            urls = [jpype.java.io.File(j).toURI().toURL() for j in jars]
+            url_cl = jpype.java.net.URLClassLoader(
+                urls, jpype.java.lang.ClassLoader.getSystemClassLoader()
+            )
 
-    # Load driver class from custom classloader and instantiate
-    driver_cls = url_cl.loadClass(jclassname)
-    driver = driver_cls.getDeclaredConstructor().newInstance()
+            # Load driver class from custom classloader and instantiate
+            driver_cls = url_cl.loadClass(jclassname)
+            driver = driver_cls.getDeclaredConstructor().newInstance()
 
-    # Create a DriverShim proxy and register it with DriverManager.
-    # The shim is a Python-implemented java.sql.Driver that delegates
-    # every call to the real driver loaded via URLClassLoader.
-    # DriverManager accepts the shim because it is loaded by the system CL.
+            # Create a DriverShim proxy and register it with DriverManager.
+            # The shim is a Python-implemented java.sql.Driver that delegates
+            # every call to the real driver loaded via URLClassLoader.
+            # DriverManager accepts the shim because it is loaded by the
+            # system CL.
 
-    @jpype.JImplements("java.sql.Driver")
-    class DriverShim:
-        def __init__(self, _driver):
-            self._driver = _driver
-        @jpype.JOverride
-        def connect(self, u, info):
-            return self._driver.connect(u, info)
-        @jpype.JOverride
-        def acceptsURL(self, u):
-            return self._driver.acceptsURL(u)
-        @jpype.JOverride
-        def getPropertyInfo(self, u, info):
-            return self._driver.getPropertyInfo(u, info)
-        @jpype.JOverride
-        def getMajorVersion(self):
-            return self._driver.getMajorVersion()
-        @jpype.JOverride
-        def getMinorVersion(self):
-            return self._driver.getMinorVersion()
-        @jpype.JOverride
-        def jdbcCompliant(self):
-            return self._driver.jdbcCompliant()
-        @jpype.JOverride
-        def getParentLogger(self):
-            return self._driver.getParentLogger()
+            @jpype.JImplements("java.sql.Driver")
+            class DriverShim:
+                def __init__(self, _driver):
+                    self._driver = _driver
+                @jpype.JOverride
+                def connect(self, u, info):
+                    return self._driver.connect(u, info)
+                @jpype.JOverride
+                def acceptsURL(self, u):
+                    return self._driver.acceptsURL(u)
+                @jpype.JOverride
+                def getPropertyInfo(self, u, info):
+                    return self._driver.getPropertyInfo(u, info)
+                @jpype.JOverride
+                def getMajorVersion(self):
+                    return self._driver.getMajorVersion()
+                @jpype.JOverride
+                def getMinorVersion(self):
+                    return self._driver.getMinorVersion()
+                @jpype.JOverride
+                def jdbcCompliant(self):
+                    return self._driver.jdbcCompliant()
+                @jpype.JOverride
+                def getParentLogger(self):
+                    return self._driver.getParentLogger()
 
-    jpype.java.sql.DriverManager.registerDriver(DriverShim(driver))
+            jpype.java.sql.DriverManager.registerDriver(DriverShim(driver))
+            _dynamic_driver_loaders[key] = url_cl
 
     # Update thread context classloader so the driver can find its own resources
     jpype.java.lang.Thread.currentThread().setContextClassLoader(url_cl)
