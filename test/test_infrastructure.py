@@ -649,6 +649,57 @@ print(f"FIRST={{try_connect()}} SECOND={{try_connect()}}")
             f'Fail-fast inconsistent between first connect and retry.\n'
             f'stdout: {stdout}\nstderr: {stderr}')
 
+    def test_dynamic_driver_not_reloaded_on_reconnect(self):
+        """Reconnects with the same jars= must reuse the dynamically loaded
+        driver: one DriverShim registered with DriverManager and one
+        URLClassLoader per (jclassname, jars), not one per connect() (#134).
+
+        Without caching, every reconnect of a long-lived process leaks a
+        classloader (never GC-able while its shim is registered) and stacks
+        up shims.  The connections' Class identity is also checked: both must
+        come from the same loader, whichever shim DriverManager picks."""
+        hsqldb_jar = self._hsqldb_jar()
+        code = f'''
+import jpype
+import jaydebeapiarrow
+
+jpype.startJVM(
+    jpype.getDefaultJVMPath(),
+    "--add-opens=java.base/java.nio=ALL-UNNAMED",
+    "--add-opens=java.base/java.lang=ALL-UNNAMED",
+    ignoreUnrecognized=True,
+    convertStrings=True,
+)
+
+url = "jdbc:hsqldb:mem:."
+args = ["SA", ""]
+conn1 = jaydebeapiarrow.connect(
+    "org.hsqldb.jdbcDriver", url, args, jars={repr(hsqldb_jar)})
+class1 = conn1.jconn.getClass()
+conn1.close()
+
+conn2 = jaydebeapiarrow.connect(
+    "org.hsqldb.jdbcDriver", url, args, jars={repr(hsqldb_jar)})
+class2 = conn2.jconn.getClass()
+conn2.close()
+
+# Same Class object <=> both connections came from the same URLClassLoader
+same_class = bool(class1.equals(class2))
+
+# How many registered drivers claim this URL?  Exactly one shim should.
+drivers = jpype.java.sql.DriverManager.getDrivers()
+accepting = 0
+while drivers.hasMoreElements():
+    if drivers.nextElement().acceptsURL(url):
+        accepting += 1
+
+print(f"SAME_CLASS={{same_class}} SHIMS={{accepting}}")
+'''
+        stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
+        self.assertEqual(stdout, 'SAME_CLASS=True SHIMS=1',
+                         f'Dynamic driver reloading leaked on reconnect.\n'
+                         f'stdout: {stdout}\nstderr: {stderr}')
+
     def test_class_not_found_without_jars_names_the_fix(self):
         """On a pre-started JVM, a driver class that is nowhere to be found
         must raise an error pointing at jars= / the classpath."""
