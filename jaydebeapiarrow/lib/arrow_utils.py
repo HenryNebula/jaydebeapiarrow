@@ -9,11 +9,30 @@ from pyarrow.cffi import ffi as arrow_c
 # Converts Java SQLException to Python DatabaseError.
 _handle_sql_exception = None
 
+# Set by __init__.py during connect() when the extension classes are not on
+# the JVM classpath (externally started JVM); None means "resolve from the
+# JVM classpath as usual".
+_jdbc_utils_class = None
+
+
+def _get_jdbc_utils():
+    """Return the JDBCUtils class of the arrow-jdbc extension.
+
+    Normally resolved from the JVM classpath (where connect() places the
+    extension jar when it starts the JVM).  When the JVM was started
+    externally without the extension jar, connect() loads it through a
+    URLClassLoader and injects the class here so the fetch path keeps
+    working with zero classpath configuration.
+    """
+    if _jdbc_utils_class is not None:
+        return _jdbc_utils_class
+    import jpype
+    return jpype.JClass("org.jaydebeapiarrow.extension.JDBCUtils")
+
 
 def _import_batch_via_cdata(root):
     """Import a Java VectorSchemaRoot as a PyArrow RecordBatch via C Data Interface."""
-    import jpype.imports
-    from org.jaydebeapiarrow.extension import JDBCUtils
+    JDBCUtils = _get_jdbc_utils()
 
     addresses = JDBCUtils.exportNextBatch(root)
     array_ptr = int(addresses[0])
@@ -23,10 +42,7 @@ def _import_batch_via_cdata(root):
 
 
 def convert_jdbc_rs_to_arrow_iterator(rs, batch_size=1024):
-    import jpype.imports
-    from org.jaydebeapiarrow.extension import JDBCUtils
-
-    return JDBCUtils.convertResultSetToIterator(rs, batch_size)
+    return _get_jdbc_utils().convertResultSetToIterator(rs, batch_size)
 
 
 def fetch_next_batch(it):
@@ -148,8 +164,7 @@ def create_pyarrow_batches_from_list(rows):
 
 
 def add_pyarrow_batches_to_statement(batches, prepared_statement, is_batch=False):
-    import jpype.imports
-    from org.jaydebeapiarrow.extension import JDBCUtils
+    JDBCUtils = _get_jdbc_utils()
 
     if len(batches) == 0:
         return

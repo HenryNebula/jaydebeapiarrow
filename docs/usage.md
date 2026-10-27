@@ -139,10 +139,36 @@ with jaydebeapiarrow.connect(
 | `jclassname` | `str` | Fully-qualified Java driver class name |
 | `url` | `str` | JDBC connection URL |
 | `driver_args` | `list` or `dict` or `None` | `[user, password]` or connection properties dict |
-| `jars` | `str` or `list[str]` or `None` | Path(s) to JDBC driver JAR(s) |
+| `jars` | `str` or `list[str]` or `None` | Path(s) to JDBC driver JAR(s). Also works on an already-running JVM (see [Starting the JVM Yourself](#starting-the-jvm-yourself)) |
 | `libs` | `str` or `list[str]` or `None` | Path(s) to native libraries |
 | `jvm_args` | `list[str]` or `None` | Extra JVM arguments passed to `startJVM()`. Only takes effect on the first `connect()` call (when the JVM is started). Ignored on subsequent calls. |
 | `experimental` | `dict` or `None` | Experimental feature flags. See [Experimental Features](#experimental-features). |
+
+### Starting the JVM Yourself
+
+Usually you let `connect()` start the JVM (it builds the classpath from `jars`, adds the module opens Arrow needs, and honors `jvm_args` for anything else). If other code in your process starts the JVM first, `connect()` still works: `jars` are loaded dynamically via a `URLClassLoader`, and the packaged Arrow extension is loaded the same way when missing from the classpath.
+
+```python
+import jpype
+import jaydebeapiarrow
+
+jpype.startJVM(
+    jpype.getDefaultJVMPath(),
+    "--enable-native-access=ALL-UNNAMED",          # your own JVM flags
+    "--add-opens=java.base/java.nio=ALL-UNNAMED",  # required by Arrow (Java 9+)
+    "--add-opens=java.base/java.lang=ALL-UNNAMED",
+    ignoreUnrecognized=True,
+)
+
+# No classpath needed above — jars load dynamically:
+conn = jaydebeapiarrow.connect(
+    "org.h2.Driver", "jdbc:h2:mem:test", ["sa", ""],
+    jars="h2.jar",
+)
+```
+
+!!! warning "Module opens cannot be granted after JVM start"
+    Arrow's memory layer must reflect on `java.nio`, which requires `--add-opens=java.base/java.nio=ALL-UNNAMED` at JVM startup on JDK 16+ (older JDKs permit it by default). When the flag is missing, `connect()` fails fast with that guidance instead of an obscure `InaccessibleObjectException` at first fetch.
 
 ## Cursor Methods
 
@@ -257,9 +283,7 @@ This bypasses the fork-after-JVM-start guard and loads JDBC drivers dynamically 
 
 ### Dynamic Classpath Loading
 
-By default, JPype's classpath is immutable after the JVM starts - you can only load JDBC drivers that were available at JVM startup time.
-
-The `experimental={'dynamic_classpath': True}` flag works around this using the **DriverShim pattern**: new JARs are loaded via Java's `URLClassLoader`, and a shim proxy is registered with `DriverManager` to delegate to the dynamically loaded driver.
+Since dynamic loading became the default for already-running JVMs (see [Starting the JVM Yourself](#starting-the-jvm-yourself)), the `experimental={'dynamic_classpath': True}` flag now has one remaining purpose: it forces drivers through the **DriverShim pattern** (new JARs loaded via Java's `URLClassLoader`, a shim proxy registered with `DriverManager`) even when the driver class is already on the classpath, and it bypasses the fork-after-JVM-start guard — which is what makes it suitable for `gunicorn --preload` workers.
 
 !!! warning "Experimental"
     This feature is experimental and may change in future versions.

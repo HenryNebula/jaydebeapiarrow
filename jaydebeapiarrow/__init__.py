@@ -240,6 +240,90 @@ def _dynamic_load_driver(jclassname, jars):
     return url_cl
 
 
+# Cache for the extension's JDBCUtils class (and the loader that produced
+# it) when it had to be loaded through a URLClassLoader (externally started
+# JVM without the extension jar on the classpath).  Guarded by
+# _jdbc_utils_lock so concurrent connect() calls produce exactly one class
+# identity — mixing classes from two loaders would raise ClassCastException
+# on the fetch path.  The loader is kept so the java.nio module-open check
+# keeps probing the class's own module on every connect(), not just the
+# first.
+_jdbc_utils_lock = threading.Lock()
+_jdbc_utils_dynamic_class = None
+_jdbc_utils_dynamic_loader = None
+
+
+def _java_base_opens_nio(loader=None):
+    """True if java.base opens java.nio to the module holding JDBCUtils.
+
+    Arrow's MemoryUtil must reflect on java.nio.Buffer.address, which is only
+    permitted when the JVM was started with
+    ``--add-opens=java.base/java.nio=ALL-UNNAMED``.  Best-effort: on JVMs
+    without module introspection (or any unexpected error) assume open and
+    let the original error surface at fetch time.
+    """
+    import jpype
+    try:
+        for_name = jpype.JClass("java.lang.Class").forName
+        java_base = for_name("java.nio.Buffer").getModule()
+        if loader is not None:
+            target = for_name(
+                "org.jaydebeapiarrow.extension.JDBCUtils", True, loader)
+        else:
+            target = for_name("org.jaydebeapiarrow.extension.JDBCUtils")
+        return bool(java_base.isOpen("java.nio", target.getModule()))
+    except Exception:
+        return True
+
+
+def _resolve_jdbc_utils():
+    """Make the extension's JDBCUtils class resolvable for the fetch path.
+
+    When connect() starts the JVM itself the extension jar is on the
+    classpath and the plain lookup below succeeds.  When the JVM was
+    started externally without it, load the packaged extension jar through
+    a URLClassLoader and inject the class into lib.arrow_utils so fetches
+    work with zero classpath configuration.  Unlike drivers — which Java's
+    DriverManager must discover via a DriverShim registered on the system
+    classloader — JDBCUtils needs no Java-side shim: the Python/Java
+    boundary is static method calls plus raw C Data pointers, so handing
+    arrow_utils the class object is sufficient.
+    """
+    global _jdbc_utils_dynamic_class, _jdbc_utils_dynamic_loader
+    import jpype
+    from jaydebeapiarrow.lib import arrow_utils
+
+    loader = None
+    try:
+        jpype.JClass("org.jaydebeapiarrow.extension.JDBCUtils")
+    except TypeError:
+        with _jdbc_utils_lock:
+            if _jdbc_utils_dynamic_class is None:
+                jars = _get_arrow_jar_paths()
+                urls = [jpype.java.io.File(j).toURI().toURL() for j in jars]
+                loader = jpype.java.net.URLClassLoader(
+                    urls,
+                    jpype.java.lang.ClassLoader.getSystemClassLoader())
+                _jdbc_utils_dynamic_class = jpype.JClass(
+                    loader.loadClass(
+                        "org.jaydebeapiarrow.extension.JDBCUtils"))
+                _jdbc_utils_dynamic_loader = loader
+            else:
+                loader = _jdbc_utils_dynamic_loader
+            arrow_utils._jdbc_utils_class = _jdbc_utils_dynamic_class
+
+    # Arrow's MemoryUtil cannot reflect on java.nio.Buffer.address unless
+    # java.base was opened at JVM start; that permission cannot be granted
+    # afterwards, so fail fast with actionable guidance instead of letting
+    # the first fetch die with a confusing InaccessibleObjectException.
+    if not _java_base_opens_nio(loader):
+        raise InterfaceError(
+            "The JVM was started without opening java.nio to Arrow, which "
+            "cannot be granted after JVM start. Restart it with "
+            "--add-opens=java.base/java.nio=ALL-UNNAMED (also recommended: "
+            "--add-opens=java.base/java.lang=ALL-UNNAMED).")
+
+
 def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs, jvm_args=None, experimental=None):
     import jpype
     global _jvm_starting, _jvm_started_pid
@@ -344,11 +428,30 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs, jvm_args=None,
     except ImportError as e:
         raise RuntimeError(f"Failed to import pyarrow.jvm ({e}). Looks like JVM is not started. Thisis required for jaydebeapiarrow to work.")
 
+    # Resolve the extension's JDBCUtils (dynamically loading the packaged
+    # extension jar when the JVM was started without it) and fail fast when
+    # Arrow's required --add-opens flags are missing.
+    _resolve_jdbc_utils()
+
     # register driver for DriverManager
     if _experimental.get('dynamic_classpath') and jars and _is_jvm_started():
         _dynamic_load_driver(jclassname, jars)
     else:
-        jpype.JClass(jclassname)
+        try:
+            jpype.JClass(jclassname)
+        except TypeError as exc:
+            if jars:
+                # The JVM was started externally without this driver on its
+                # classpath; load it from `jars` through a URLClassLoader so
+                # jars= works plug-and-play on a pre-started JVM (#128).
+                _dynamic_load_driver(jclassname, jars)
+            else:
+                raise TypeError(
+                    "Class %s is not found. It is not on the JVM classpath "
+                    "and no jars were given to load it from. If you start "
+                    "the JVM yourself, pass the driver JAR via jars= or put "
+                    "it on the classpath before startJVM()." % jclassname
+                ) from exc
 
     if isinstance(driver_args, dict):
         Properties = jpype.java.util.Properties
@@ -597,10 +700,20 @@ def connect(jclassname, url, driver_args=None, jars=None, libs=None, jvm_args=No
           is started). Ignored on subsequent calls.
     experimental: Optional dict of experimental feature flags.
           Supported keys:
-            dynamic_classpath (bool): If True, allow loading JDBC drivers
-              from JARs after the JVM has already been started, using a
-              DriverShim proxy.  This also bypasses the fork-after-JVM-start
-              guard, making it suitable for gunicorn --preload workers.
+            dynamic_classpath (bool): If True, always load JDBC drivers
+              from JARs through a URLClassLoader DriverShim, even when the
+              class is already on the classpath.  This also bypasses the
+              fork-after-JVM-start guard, making it suitable for
+              gunicorn --preload workers.
+
+    Note: when the JVM is already running (e.g. started manually via
+    jpype.startJVM()), jars are loaded dynamically through a URLClassLoader,
+    and the packaged Arrow extension is loaded the same way when missing
+    from the classpath.  An externally started JVM must still pass
+    --add-opens=java.base/java.nio=ALL-UNNAMED (plus
+    --add-opens=java.base/java.lang=ALL-UNNAMED for some drivers), since
+    module opens cannot be granted after JVM start; connect() fails fast
+    with that guidance when the flag is missing.
     """
     if not isinstance(url, str):
         raise ProgrammingError(
