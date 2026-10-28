@@ -143,6 +143,13 @@ def _handle_sql_exception_jpype():
     SQLException = jpype.java.sql.SQLException
     exc_info = sys.exc_info()
     exc_val = exc_info[1]
+    if exc_val is not None and not hasattr(exc_val, 'getClass'):
+        # Not a Java exception (a Python AttributeError/TypeError, or
+        # Ctrl-C as KeyboardInterrupt, caught by the bare except around
+        # the JDBC calls): re-raise unchanged with its original traceback
+        # instead of letting the Java message builder mask it behind its
+        # own AttributeError on getClass().
+        raise
 
     # Check the exception and its cause chain for SQLException.
     # The Arrow JDBC library wraps driver SQLExceptions in
