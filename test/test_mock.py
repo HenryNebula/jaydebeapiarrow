@@ -683,6 +683,24 @@ class MockTest(unittest.TestCase):
             except jaydebeapiarrow.InterfaceError as e:
                 self.assertIn("RuntimeException: expected", str(e))
 
+    def test_non_java_exception_reraised_verbatim_by_handler(self):
+        """A non-Java exception reaching the bare-except funnel (a Python
+        AttributeError/TypeError, or Ctrl-C as KeyboardInterrupt) must be
+        re-raised unchanged. It used to be masked by the message builder's
+        own AttributeError on getClass(), hiding the real failure."""
+        handler = jaydebeapiarrow._handle_sql_exception_jpype
+        with self.assertRaises(AttributeError) as ctx:
+            try:
+                raise AttributeError('original failure')
+            except BaseException:
+                handler()
+        self.assertEqual(str(ctx.exception), 'original failure')
+        with self.assertRaises(KeyboardInterrupt):
+            try:
+                raise KeyboardInterrupt()
+            except BaseException:
+                handler()
+
     def test_runtime_exception_on_execute_includes_cause_chain(self):
         """RuntimeException with a nested cause should include the cause message."""
         self.conn.jconn.mockExceptionOnExecuteWithCause(
