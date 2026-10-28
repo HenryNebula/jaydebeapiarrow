@@ -902,6 +902,11 @@ class Cursor(object):
         self._prep = None
         self.rowcount = -1
         self.lastrowid = None
+        # Whether execute()/executemany() has ever run on this cursor;
+        # fetch methods raise ProgrammingError before the first execute
+        # (PEP 249) but stay lenient after a statement that produced no
+        # result set.
+        self._executed = False
 
     @property
     def connection(self):
@@ -1102,6 +1107,7 @@ class Cursor(object):
             parameters = ()
         self._close_last()
         self.lastrowid = None
+        self._executed = True
         try:
             self._prep = self._connection.jconn.prepareStatement(operation, 1)
         except Exception:
@@ -1133,6 +1139,7 @@ class Cursor(object):
     def executemany(self, operation, seq_of_parameters):
         self._close_last()
         self.lastrowid = None
+        self._executed = True
         try:
             self._prep = self._connection.jconn.prepareStatement(operation, 1)
         except Exception:
@@ -1146,7 +1153,13 @@ class Cursor(object):
         except:
             _handle_sql_exception()
         # self._prep.getWarnings() ???
-        self.rowcount = sum(update_counts)
+        # Some drivers return null instead of an int[] (e.g. the
+        # Mockito-backed MockDriver's unstubbed executeBatch); PEP 249 says
+        # rowcount is -1 when the count is not determinable by the interface.
+        if update_counts is None:
+            self.rowcount = -1
+        else:
+            self.rowcount = sum(update_counts)
         self._close_last()
 
     def _get_iter(self):
@@ -1215,7 +1228,17 @@ class Cursor(object):
             out.append(tuple(row))
         return out
 
+    def _verify_fetchable(self, method_name):
+        """PEP 249: fetch methods raise an Error when no execute() has been
+        made on the cursor.  A statement that was executed but produced no
+        result set (DDL/DML, executemany) keeps the established lenient
+        None/[] behavior — see the fetch_after_ddl tests in test_hsqldb."""
+        if not self._rs and not self._executed:
+            raise ProgrammingError(
+                f'{method_name}() called before execute()')
+
     def fetchone(self):
+        self._verify_fetchable('fetchone')
         if not self._rs:
             return None
 
@@ -1234,6 +1257,7 @@ class Cursor(object):
         return None
 
     def fetchmany(self, size=None):
+        self._verify_fetchable('fetchmany')
         if not self._rs:
             return []
 
@@ -1262,6 +1286,7 @@ class Cursor(object):
         return result
 
     def fetchall(self):
+        self._verify_fetchable('fetchall')
         if not self._rs:
             return []
 
