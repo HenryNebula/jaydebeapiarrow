@@ -22,11 +22,6 @@ from unittest import mock
 
 import jaydebeapiarrow
 
-try:
-    from test._base import _SUPPRESS_LOGGING_ARGS
-except ImportError:
-    from _base import _SUPPRESS_LOGGING_ARGS
-
 
 class ModuleInterfaceConformanceTest(unittest.TestCase):
     """PEP 249 'Module Interface' section."""
@@ -86,8 +81,7 @@ class ConnectionAndCursorConformanceTest(unittest.TestCase):
     def setUp(self):
         self.conn = jaydebeapiarrow.connect(
             'org.jaydebeapi.mockdriver.MockDriver',
-            'jdbc:jaydebeapi://dummyurl',
-            jvm_args=_SUPPRESS_LOGGING_ARGS)
+            'jdbc:jaydebeapi://dummyurl')
 
     def tearDown(self):
         self.conn.close()

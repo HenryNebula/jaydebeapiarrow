@@ -69,9 +69,11 @@ def set_debug(enabled=True):
     """Enable or disable debug logging from the Java bridge (JUL FINE level).
 
     This controls java.util.logging for the org.jaydebeapiarrow.extension
-    package. By default only INFO and above is printed; calling
-    ``set_debug(True)`` enables column mapping, parameter binding, and
-    other diagnostic messages.
+    package. By default only WARNING and above is printed (see the packaged
+    ``logging.properties``); calling ``set_debug(True)`` enables column
+    mapping, parameter binding, and other diagnostic messages. Because the
+    bundled SLF4J binding routes Arrow and JDBC-driver logs into JUL as
+    well, this also surfaces their FINER detail.
 
     Must be called *after* the JVM has been started (i.e. after
     ``connect()``). Calling before the JVM starts is a no-op.
@@ -82,7 +84,7 @@ def set_debug(enabled=True):
     if not _is_jvm_started():
         return
     Level = jpype.JClass("java.util.logging.Level")
-    target_level = Level.FINE if enabled else Level.INFO
+    target_level = Level.FINE if enabled else Level.WARNING
     logger = jpype.JClass("java.util.logging.Logger").getLogger(
         "org.jaydebeapiarrow.extension"
     )
@@ -353,6 +355,27 @@ def _resolve_jdbc_utils():
             "--add-opens=java.base/java.lang=ALL-UNNAMED).")
 
 
+_DEFAULT_LOGGING_PROPERTIES = os.path.join(
+    os.path.dirname(__file__), 'logging.properties')
+
+_JUL_CONFIG_PROPERTIES = (
+    'java.util.logging.config.file',
+    'java.util.logging.config.class',
+)
+
+
+def _default_jul_config_arg(jvm_args):
+    """JVM args pointing java.util.logging at the packaged
+    logging.properties, or [] when the user already configured JUL
+    (config.file or config.class) via jvm_args."""
+    for arg in jvm_args or []:
+        for prop in _JUL_CONFIG_PROPERTIES:
+            if arg.startswith('-D%s=' % prop):
+                return []
+    return ['-Djava.util.logging.config.file=%s'
+            % _DEFAULT_LOGGING_PROPERTIES]
+
+
 def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs, jvm_args=None, experimental=None):
     import jpype
     global _jvm_starting, _jvm_started_pid
@@ -388,7 +411,11 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs, jvm_args=None,
                 class_path.extend(jars)
             class_path.extend(_get_classpath())
             class_path.extend(_get_arrow_jar_paths())
-            class_path = list(set(class_path))
+            # Order-preserving dedup: jars, then CLASSPATH env, then the
+            # packaged extension jar.  SLF4J discovers providers on the
+            # system classloader in classpath order, so a user-supplied
+            # binding on CLASSPATH deterministically precedes ours.
+            class_path = list(dict.fromkeys(class_path))
 
             args = []
 
@@ -410,7 +437,12 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs, jvm_args=None,
             args.append('--add-opens=java.base/java.nio=ALL-UNNAMED')
             # Drill's javassist needs reflective access to ClassLoader.defineClass
             args.append('--add-opens=java.base/java.lang=ALL-UNNAMED')
-            # User-supplied extra JVM arguments (e.g. logging suppression)
+            # Default JUL config (WARNING console) unless the user brings
+            # their own java.util.logging configuration.  Injected before
+            # user args: the JVM lets a later duplicate -D win, so an
+            # explicit user value overrides even without the skip check.
+            args.extend(_default_jul_config_arg(jvm_args))
+            # User-supplied extra JVM arguments
             args.extend(jvm_args or [])
 
             # jvm_path = ('/usr/lib/jvm/java-6-openjdk'
@@ -726,7 +758,11 @@ def connect(jclassname, url, driver_args=None, jars=None, libs=None, jvm_args=No
           library by the JDBC driver
     jvm_args: Optional list of extra JVM arguments passed to startJVM().
           Only takes effect on the first connect() call (when the JVM
-          is started). Ignored on subsequent calls.
+          is started). Ignored on subsequent calls. When connect() starts
+          the JVM, a default ``java.util.logging.config.file`` pointing at
+          the packaged logging.properties (WARNING console level) is
+          injected unless jvm_args sets ``java.util.logging.config.file``
+          or ``.class`` (see the Logging section of the docs).
     experimental: Optional dict of experimental feature flags.
           Supported keys:
             dynamic_classpath (bool): If True, always load JDBC drivers

@@ -26,11 +26,6 @@ import threading
 from functools import partial
 
 try:
-    from test._base import _SUPPRESS_LOGGING_ARGS
-except ImportError:
-    from _base import _SUPPRESS_LOGGING_ARGS
-
-try:
     import unittest2 as unittest
 except ImportError:
     import unittest
@@ -39,8 +34,7 @@ class MockTest(unittest.TestCase):
 
     def setUp(self):
         self.conn = jaydebeapiarrow.connect('org.jaydebeapi.mockdriver.MockDriver',
-                                       'jdbc:jaydebeapi://dummyurl',
-                                       jvm_args=_SUPPRESS_LOGGING_ARGS)
+                                       'jdbc:jaydebeapi://dummyurl')
 
     def tearDown(self):
         self.conn.close()
@@ -769,8 +763,7 @@ class MockTest(unittest.TestCase):
 
     def test_connection_with_statement(self):
         with jaydebeapiarrow.connect('org.jaydebeapi.mockdriver.MockDriver',
-                                       'jdbc:jaydebeapi://dummyurl',
-                                       jvm_args=_SUPPRESS_LOGGING_ARGS) as conn:
+                                       'jdbc:jaydebeapi://dummyurl') as conn:
             self.assertEqual(conn._closed, False)
         self.assertEqual(conn._closed, True)
 
@@ -1273,8 +1266,7 @@ class MockTest(unittest.TestCase):
             warnings.simplefilter('always')
             self.conn = jaydebeapiarrow.connect(
                 'org.jaydebeapi.mockdriver.MockDriver',
-                'jdbc:jaydebeapi://dummyurl',
-                jvm_args=_SUPPRESS_LOGGING_ARGS)
+                'jdbc:jaydebeapi://dummyurl')
         jpype_warnings = [w for w in caught
                           if issubclass(w.category, DeprecationWarning)
                           and 'jpype' in str(w.message).lower()]
