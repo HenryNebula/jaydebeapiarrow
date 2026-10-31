@@ -2,14 +2,7 @@
 import pyarrow as pa
 from pyarrow.cffi import ffi as arrow_c
 
-# Set by __init__.py after JPype initialization.
-# Converts Java SQLException to Python DatabaseError.
-_handle_sql_exception = None
-
-# Set by __init__.py during connect() when the extension classes are not on
-# the JVM classpath (externally started JVM); None means "resolve from the
-# JVM classpath as usual".
-_jdbc_utils_class = None
+import jaydebeapiarrow._bridge as _bridge
 
 
 def _get_jdbc_utils():
@@ -18,11 +11,11 @@ def _get_jdbc_utils():
     Normally resolved from the JVM classpath (where connect() places the
     extension jar when it starts the JVM).  When the JVM was started
     externally without the extension jar, connect() loads it through a
-    URLClassLoader and injects the class here so the fetch path keeps
-    working with zero classpath configuration.
+    URLClassLoader and injects the class into _bridge so the fetch path
+    keeps working with zero classpath configuration.
     """
-    if _jdbc_utils_class is not None:
-        return _jdbc_utils_class
+    if _bridge._jdbc_utils_class is not None:
+        return _bridge._jdbc_utils_class
     import jpype
     return jpype.JClass("org.jaydebeapiarrow.extension.JDBCUtils")
 
@@ -58,8 +51,8 @@ def fetch_next_batch(it):
             decimal_message = _find_decimal_conversion_message(e)
             if decimal_message:
                 raise RuntimeError(decimal_message) from e
-            if _handle_sql_exception is not None:
-                _handle_sql_exception()
+            if _bridge._handle_sql_exception is not None:
+                _bridge._handle_sql_exception()
             raise
         try:
             batch = _import_batch_via_cdata(root)

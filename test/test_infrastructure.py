@@ -918,7 +918,7 @@ class _ReflectionTestBase(object):
         connection initializes the type mapping via Reflection."""
         import jpype
         Types = jpype.java.sql.Types
-        self.assertIsNotNone(jaydebeapiarrow._jdbc_const_to_name)
+        self.assertIsNotNone(jaydebeapiarrow._dbapi._jdbc_const_to_name)
         self.assertEqual(jaydebeapiarrow.NUMBER, Types.INTEGER)
         self.assertEqual(jaydebeapiarrow.STRING, Types.VARCHAR)
         self.assertEqual(jaydebeapiarrow.DATETIME, Types.TIMESTAMP)
@@ -963,8 +963,8 @@ class _ReflectionTestBase(object):
         Types = jpype.java.sql.Types
         result = jaydebeapiarrow.DBAPITypeObject._map_jdbc_type_to_dbapi(Types.INTEGER)
         self.assertIs(result, jaydebeapiarrow.NUMBER)
-        self.assertIsNotNone(jaydebeapiarrow._jdbc_const_to_name)
-        self.assertGreater(len(jaydebeapiarrow._jdbc_const_to_name), 20)
+        self.assertIsNotNone(jaydebeapiarrow._dbapi._jdbc_const_to_name)
+        self.assertGreater(len(jaydebeapiarrow._dbapi._jdbc_const_to_name), 20)
 
     def test_dbapi_type_eq_with_jdbc_constants(self):
         """Verify DBAPITypeObject.__eq__ works with JDBC type constants
