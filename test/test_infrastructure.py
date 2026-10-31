@@ -15,14 +15,13 @@ import tempfile
 import unittest
 
 try:
-    from test._base import _THIS_DIR, _SUPPRESS_LOGGING_ARGS
+    from test._base import _THIS_DIR
 except ImportError:
-    from _base import _THIS_DIR, _SUPPRESS_LOGGING_ARGS
+    from _base import _THIS_DIR
 
 
 def _connect(*args, **kwargs):
-    """Wrapper that injects logging suppression JVM args on first connect."""
-    kwargs.setdefault('jvm_args', _SUPPRESS_LOGGING_ARGS)
+    """Thin wrapper around jaydebeapiarrow.connect()."""
     return jaydebeapiarrow.connect(*args, **kwargs)
 
 
@@ -733,6 +732,154 @@ except Exception as e:
         self.assertEqual(stdout, 'GUIDANCE_OK',
                          f'Class-not-found error should include jars guidance.\n'
                          f'stdout: {stdout}\nstderr: {stderr}')
+
+
+# ---------------------------------------------------------------------------
+# Logging defaults (issue #140)
+# ---------------------------------------------------------------------------
+
+class LoggingDefaultsTest(unittest.TestCase):
+    """connect() must start the JVM quiet by default: SLF4J routed to JUL
+    via the bundled binding, packaged logging.properties at WARNING, and
+    user-supplied JUL configuration respected.
+
+    Each test runs in its own subprocess: the suite shares one JVM per
+    pytest process and only the first connect()'s jvm_args take effect.
+    """
+
+    def _run_in_subprocess(self, code, env=None):
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True, text=True, timeout=60,
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            env=env
+        )
+        return result.stdout.strip(), result.stderr.strip()
+
+    def _bare_env(self):
+        return {k: v for k, v in os.environ.items() if k != 'CLASSPATH'}
+
+    def _mock_jar(self):
+        for root, dirs, files in os.walk(_THIS_DIR):
+            for f in files:
+                if f.startswith('mockdriver') and f.endswith('.jar'):
+                    return os.path.join(root, f)
+        self.skipTest('mockdriver JAR not found')
+
+    def test_default_connect_emits_no_arrow_logs(self):
+        """Issue #140: a plain connect() must not spill org.apache.arrow
+        INFO records onto stdout/stderr."""
+        jar = self._mock_jar()
+        code = f'''
+import jaydebeapiarrow
+conn = jaydebeapiarrow.connect(
+    "org.jaydebeapi.mockdriver.MockDriver",
+    "jdbc:jaydebeapi://dummyurl",
+    jars={repr(jar)},
+)
+conn.close()
+print("DONE")
+'''
+        stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
+        self.assertEqual(stdout, 'DONE',
+                         f'stdout polluted: {stdout!r}\nstderr: {stderr!r}')
+        self.assertNotIn('org.apache.arrow', stdout)
+        self.assertNotIn('org.apache.arrow', stderr)
+
+    def test_slf4j_binding_is_jul(self):
+        """The bundled binding must route SLF4J into java.util.logging."""
+        jar = self._mock_jar()
+        code = f'''
+import jpype, jaydebeapiarrow
+conn = jaydebeapiarrow.connect(
+    "org.jaydebeapi.mockdriver.MockDriver",
+    "jdbc:jaydebeapi://dummyurl",
+    jars={repr(jar)},
+)
+conn.close()
+factory = jpype.JClass("org.slf4j.LoggerFactory").getILoggerFactory()
+print("FACTORY=" + factory.getClass().getName())
+'''
+        stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
+        self.assertEqual(stdout, 'FACTORY=org.slf4j.jul.JDK14LoggerFactory',
+                         f'Wrong SLF4J binding.\nstdout: {stdout}\nstderr: {stderr}')
+
+    def test_user_jul_config_file_respected(self):
+        """Passing -Djava.util.logging.config.file via jvm_args must skip
+        the default injection and apply the user's file."""
+        jar = self._mock_jar()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            own = os.path.join(tmpdir, 'my-logging.properties')
+            with open(own, 'w') as f:
+                f.write('handlers=java.util.logging.ConsoleHandler\n'
+                        '.level=SEVERE\n')
+            code = f'''
+import jpype, jaydebeapiarrow
+conn = jaydebeapiarrow.connect(
+    "org.jaydebeapi.mockdriver.MockDriver",
+    "jdbc:jaydebeapi://dummyurl",
+    jars={repr(jar)},
+    jvm_args=["-Djava.util.logging.config.file=" + {repr(own)}],
+)
+conn.close()
+root = jpype.JClass("java.util.logging.Logger").getLogger("")
+print("LEVEL=" + str(root.getLevel()))
+'''
+            stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
+        self.assertEqual(stdout, 'LEVEL=SEVERE',
+                         f'User JUL config not honored.\nstdout: {stdout}\nstderr: {stderr}')
+
+    def test_classpath_order_is_deterministic(self):
+        """jars= entries must precede the packaged extension jar on the
+        classpath, with no duplicates (stable SLF4J provider order)."""
+        jar = self._mock_jar()
+        code = f'''
+import jpype, jaydebeapiarrow
+conn = jaydebeapiarrow.connect(
+    "org.jaydebeapi.mockdriver.MockDriver",
+    "jdbc:jaydebeapi://dummyurl",
+    jars={repr(jar)})
+conn.close()
+print("CP=" + jpype.java.lang.System.getProperty("java.class.path"))
+'''
+        stdout, _ = self._run_in_subprocess(code, env=self._bare_env())
+        cp = stdout.split('CP=', 1)[1].split(os.pathsep)
+        self.assertEqual(os.path.basename(cp[0]),
+                         os.path.basename(jar))          # jars= first
+        # The extension jar (and any CLASSPATH entries) must follow the
+        # user jars.  JPype appends its own org.jpype.jar at the end, so
+        # "extension last" is not the invariant — relative order is.
+        extension_idx = [i for i, p in enumerate(cp)
+                         if 'arrow-jdbc-extension' in os.path.basename(p)]
+        self.assertTrue(extension_idx,
+                        f'extension jar missing from classpath: {cp}')
+        self.assertLess(0, min(extension_idx))
+        self.assertEqual(len(cp), len(set(cp)))          # no duplicates
+
+
+class JulConfigInjectionTest(unittest.TestCase):
+    """Skip logic for the default -Djava.util.logging injection."""
+
+    def test_injected_when_no_user_config(self):
+        self.assertEqual(
+            jaydebeapiarrow._default_jul_config_arg(None),
+            ['-Djava.util.logging.config.file='
+             + jaydebeapiarrow._DEFAULT_LOGGING_PROPERTIES])
+
+    def test_injected_for_unrelated_args(self):
+        args = jaydebeapiarrow._default_jul_config_arg(['-Xmx1g'])
+        self.assertEqual(len(args), 1)
+        self.assertTrue(args[0].startswith('-Djava.util.logging.config.file='))
+
+    def test_skipped_for_user_config_file(self):
+        self.assertEqual(
+            jaydebeapiarrow._default_jul_config_arg(
+                ['-Djava.util.logging.config.file=/mine.properties']), [])
+
+    def test_skipped_for_user_config_class(self):
+        self.assertEqual(
+            jaydebeapiarrow._default_jul_config_arg(
+                ['-Djava.util.logging.config.class=com.acme.LogCfg']), [])
 
 
 # ---------------------------------------------------------------------------

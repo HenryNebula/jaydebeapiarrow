@@ -29,7 +29,7 @@ This fork returns native Python types instead of strings for temporal and numeri
 - **`fetch_arrow_table()`** - returns a single `pyarrow.Table`.
 - **`fetch_df()`** - returns a `pandas.DataFrame` via the optimized Arrow path.
 - **`TIMESTAMP_WITH_TIMEZONE` support** - properly handled as timezone-aware `datetime` (the parent has no converter for this type).
-- **`set_debug()`** - enables JUL-level debug logging from the Java bridge.
+- **`set_debug()`** - enables JUL-level debug logging from the Java bridge; Java-side logging defaults to WARNING via the packaged `logging.properties` (see [Usage: Logging](usage.md#logging)).
 
 ### Type Mapping Improvements
 

@@ -76,3 +76,6 @@ values = ["dev", "rc", "final"]
 [tool.setuptools]
 packages = ["jaydebeapiarrow", "jaydebeapiarrow.lib"]
 include-package-data = true
+
+[tool.setuptools.package-data]
+jaydebeapiarrow = ["logging.properties"]

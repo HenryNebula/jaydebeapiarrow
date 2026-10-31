@@ -12,9 +12,9 @@ except ImportError:
     jaydebeapi = None
 
 try:
-    from test._base import IntegrationTestBase, _THIS_DIR, _SUPPRESS_LOGGING_ARGS
+    from test._base import IntegrationTestBase, _THIS_DIR
 except ImportError:
-    from _base import IntegrationTestBase, _THIS_DIR, _SUPPRESS_LOGGING_ARGS
+    from _base import IntegrationTestBase, _THIS_DIR
 
 
 class HsqldbTest(IntegrationTestBase, unittest.TestCase):
@@ -42,8 +42,7 @@ class CursorDescriptionTest(unittest.TestCase):
         not an AttributeError from a missing _meta attribute."""
         conn = jaydebeapiarrow.connect('org.hsqldb.jdbcDriver',
                                        'jdbc:hsqldb:mem:desc_before_execute',
-                                       ['SA', ''],
-                                       jvm_args=_SUPPRESS_LOGGING_ARGS)
+                                       ['SA', ''])
         try:
             with conn.cursor() as cursor:
                 self.assertIsNone(cursor.description)
@@ -57,8 +56,7 @@ class HsqldbMultipleConnectionsTest(unittest.TestCase):
     def _connect(self, db_name):
         driver = 'org.hsqldb.jdbcDriver'
         url = f'jdbc:hsqldb:mem:{db_name}'
-        return jaydebeapiarrow.connect(driver, url, ['SA', ''],
-                                       jvm_args=_SUPPRESS_LOGGING_ARGS)
+        return jaydebeapiarrow.connect(driver, url, ['SA', ''])
 
     def test_sequential_connections(self):
         """Connect, query, close, then connect again — each cycle should succeed."""
@@ -94,8 +92,7 @@ class HsqldbHighPrecisionNumericTest(unittest.TestCase):
     def setUp(self):
         self.conn = jaydebeapiarrow.connect(
             'org.hsqldb.jdbcDriver', 'jdbc:hsqldb:mem:hpnumeric',
-            ['SA', ''],
-            jvm_args=_SUPPRESS_LOGGING_ARGS)
+            ['SA', ''])
 
     def tearDown(self):
         self.conn.close()
@@ -218,8 +215,7 @@ class HsqldbArrayTypeTest(unittest.TestCase):
     def setUp(self):
         self.conn = jaydebeapiarrow.connect(
             'org.hsqldb.jdbcDriver', 'jdbc:hsqldb:mem:arraytest',
-            ['SA', ''],
-            jvm_args=_SUPPRESS_LOGGING_ARGS)
+            ['SA', ''])
         with self.conn.cursor() as cursor:
             cursor.execute(
                 "CREATE TABLE test_arrays ("
@@ -327,8 +323,7 @@ class HsqldbDecimalArrayTest(unittest.TestCase):
     def setUp(self):
         self.conn = jaydebeapiarrow.connect(
             'org.hsqldb.jdbcDriver', 'jdbc:hsqldb:mem:decarraytest',
-            ['SA', ''],
-            jvm_args=_SUPPRESS_LOGGING_ARGS)
+            ['SA', ''])
         with self.conn.cursor() as cursor:
             cursor.execute(
                 "CREATE TABLE test_dec_arrays ("
@@ -522,8 +517,7 @@ class HsqldbFetchPerformanceTest(unittest.TestCase):
                 'the performance regression tests')
         cls.conn = jaydebeapiarrow.connect(
             'org.hsqldb.jdbcDriver', 'jdbc:hsqldb:mem:perftest',
-            ['SA', ''],
-            jvm_args=_SUPPRESS_LOGGING_ARGS)
+            ['SA', ''])
         # Same in-memory DB through the row-by-row library, reusing the
         # running JVM.
         cls.legacy_conn = jaydebeapi.connect(
