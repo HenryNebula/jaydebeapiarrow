@@ -1498,6 +1498,23 @@ class MockTest(unittest.TestCase):
             with self.assertRaises(jaydebeapiarrow.DatabaseError):
                 cursor.fetchall()
 
+    def test_set_debug_toggles_jul_level(self):
+        """set_debug() must work once the JVM is running.
+
+        Regression: it referenced jpype without importing it (NameError),
+        and nothing else in the suite called it, so the breakage shipped.
+        """
+        import jpype
+        Logger = jpype.JClass("java.util.logging.Logger")
+        ext_logger = Logger.getLogger("org.jaydebeapiarrow.extension")
+        try:
+            jaydebeapiarrow.set_debug(True)
+            self.assertEqual(str(ext_logger.getLevel()), "FINE")
+            jaydebeapiarrow.set_debug(False)
+            self.assertEqual(str(ext_logger.getLevel()), "WARNING")
+        finally:
+            jaydebeapiarrow.set_debug(False)
+
 
 class DecimalWidthInferenceTest(unittest.TestCase):
     """_infer_decimal_widths must count the integer digits a positive

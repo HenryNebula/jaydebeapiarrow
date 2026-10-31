@@ -383,6 +383,11 @@ Use `gunicorn --preload` with lazy connections, or enable dynamic classpath - se
 
 ### Non-ASCII characters garbled
 
+Some JDBC drivers (notably IBM Db2) convert strings through the JVM's default
+charset. When that default is not UTF-8 (e.g. `ANSI_X3.4-1968` on minimal
+server locales), non-ASCII characters — umlauts, CJK, emoji — raise
+`java.io.CharConversionException` during result-set traversal.
+
 Add JVM encoding argument or set environment variable:
 
 ```python

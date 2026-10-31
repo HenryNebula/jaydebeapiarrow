@@ -9,6 +9,22 @@ on:
     branches: [ master ]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v6
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+    - name: Install ruff
+      run: pip install ruff
+    - name: Lint
+      # Scoped to the shipped package; test/ and aux dirs are not yet clean.
+      run: ruff check jaydebeapiarrow/
+
   test:
 
     # Pinned: ubuntu-latest now serves 26.04, whose setup-python manifest
