@@ -33,3 +33,4 @@ benchmark/profiles/
 uv.lock
 site/
 test/mock-jars/site/
+test/mock-jars/

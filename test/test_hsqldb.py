@@ -1,10 +1,10 @@
-#-*- coding: utf-8 -*-
 
-import jaydebeapiarrow
 import os
 import time
 import unittest
 from decimal import Decimal
+
+import jaydebeapiarrow
 
 try:
     import jaydebeapi
@@ -12,9 +12,9 @@ except ImportError:
     jaydebeapi = None
 
 try:
-    from test._base import IntegrationTestBase, _THIS_DIR
+    from test._base import _THIS_DIR, IntegrationTestBase
 except ImportError:
-    from _base import IntegrationTestBase, _THIS_DIR
+    from _base import _THIS_DIR, IntegrationTestBase
 
 
 class HsqldbTest(IntegrationTestBase, unittest.TestCase):
@@ -534,7 +534,7 @@ class HsqldbFetchPerformanceTest(unittest.TestCase):
                              ('id', 'int_val', 'double_val',
                               'str_val', 'dec_val'), cls.ROWS)
             cursor.execute('CREATE TABLE perf_hp (id BIGINT, val NUMERIC(1000, 64))')
-            cursor.execute('INSERT INTO perf_hp VALUES (1, %s)' % cls.HP_VALUE)
+            cursor.execute(f'INSERT INTO perf_hp VALUES (1, {cls.HP_VALUE})')
             cls._double_rows(cursor, 'perf_hp', ('id', 'val'), cls.ROWS)
 
     @classmethod
@@ -552,16 +552,16 @@ class HsqldbFetchPerformanceTest(unittest.TestCase):
         while count < target:
             step = min(count, target - count)
             select_list = ', '.join(
-                '%s + %d' % (col, count) if col == 'id' else col
+                f'{col} + {count}' if col == 'id' else col
                 for col in columns)
             cursor.execute(
-                'INSERT INTO %s SELECT %s FROM %s WHERE id <= %d'
-                % (table, select_list, table, step))
+                f'INSERT INTO {table} SELECT {select_list} FROM {table} '
+                f'WHERE id <= {step}')
             count += step
 
     def _fetchall(self, connection, table):
         with connection.cursor() as cursor:
-            cursor.execute('SELECT * FROM %s' % table)
+            cursor.execute(f'SELECT * FROM {table}')
             return cursor.fetchall()
 
     @staticmethod
@@ -605,7 +605,7 @@ class HsqldbFetchPerformanceTest(unittest.TestCase):
         self.assertGreaterEqual(
             speedup, required_speedup,
             'Arrow fetchall() lost its speedup over the JPype row-by-row '
-            'path (best of two rounds: %.2fx)' % speedup)
+            f'path (best of two rounds: {speedup:.2f}x)')
         return arrow_rows
 
     def test_fetchall_faster_than_jaydebeapi(self):

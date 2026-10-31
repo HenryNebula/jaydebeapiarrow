@@ -1,4 +1,3 @@
-#-*- coding: utf-8 -*-
 """PEP 249 (DB-API 2.0) conformance checks for jaydebeapiarrow.
 
 Structural and behavioral conformance of the module interface, exception

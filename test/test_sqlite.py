@@ -1,15 +1,14 @@
-#-*- coding: utf-8 -*-
+
+import unittest
+from datetime import datetime
+from decimal import Decimal
 
 import jaydebeapiarrow
-import os
-import unittest
 
-from decimal import Decimal
-from datetime import datetime
 try:
-    from test._base import IntegrationTestBase, SqliteTestBase, _THIS_DIR
+    from test._base import SqliteTestBase
 except ImportError:
-    from _base import IntegrationTestBase, SqliteTestBase, _THIS_DIR
+    from _base import SqliteTestBase
 
 
 class SqlitePyTest(SqliteTestBase, unittest.TestCase):
@@ -37,8 +36,11 @@ class SqlitePyTest(SqliteTestBase, unittest.TestCase):
     def connect(self):
         import sqlite3
         sqlite3.register_adapter(Decimal, lambda d: str(d))
-        sqlite3.register_converter("decimal", lambda s: Decimal(s.decode('utf-8')) if s is not None else s)
-        return sqlite3, self.ConnectionWithClosing(sqlite3.connect(':memory:', detect_types=sqlite3.PARSE_DECLTYPES))
+        sqlite3.register_converter(
+            "decimal",
+            lambda s: Decimal(s.decode('utf-8')) if s is not None else s)
+        conn = sqlite3.connect(':memory:', detect_types=sqlite3.PARSE_DECLTYPES)
+        return sqlite3, self.ConnectionWithClosing(conn)
 
     def test_execute_type_time(self):
         self.skipTest("Time type not supported by PySqlite")
@@ -183,7 +185,8 @@ class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
     def test_execute_types(self):
         """
         xerial/sqlite-jdbc has some issues with type mapping:
-        1. Timestamp has inconsistent types: JDBC returns it as a VARCHAR, while it's defined as a TIMESTAMP in the DB
+        1. Timestamp has inconsistent types: JDBC returns it as a VARCHAR,
+           while it's defined as a TIMESTAMP in the DB
         2. Default date_string_format does not handle ISO Date (without microseconds)
         3. SQLite stores DECIMAL values with dynamic typing (integer vs double)
         """
@@ -197,7 +200,7 @@ class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
         dbl_col = 3.5
         opened_at = self.dbapi.Timestamp(2008, 2, 27, 0, 0, 0)
         valid = True
-        product_name = u'Savings account'
+        product_name = 'Savings account'
         parms = (
             account_id,
             account_no, balance, blocking, dbl_col,

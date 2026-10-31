@@ -22,8 +22,9 @@ jobs:
     - name: Install ruff
       run: pip install ruff
     - name: Lint
-      # Scoped to the shipped package; test/ and aux dirs are not yet clean.
-      run: ruff check jaydebeapiarrow/
+      # Package + tests + root conftest. Untracked scratch dirs
+      # (benchmark/, triage/, debug/, scripts/) are not linted.
+      run: ruff check jaydebeapiarrow/ test/ conftest.py
 
   test:
 
