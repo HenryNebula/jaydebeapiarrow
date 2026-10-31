@@ -1,16 +1,16 @@
-#-*- coding: utf-8 -*-
 
-import jaydebeapiarrow
 import calendar
 import os
 import unittest
-
+from datetime import timedelta
 from decimal import Decimal
-from datetime import datetime, timedelta
+
+import jaydebeapiarrow
+
 try:
-    from test._base import IntegrationTestBase, _THIS_DIR
+    from test._base import _THIS_DIR, IntegrationTestBase
 except ImportError:
-    from _base import IntegrationTestBase, _THIS_DIR
+    from _base import _THIS_DIR, IntegrationTestBase
 
 
 class DrillTest(IntegrationTestBase, unittest.TestCase):

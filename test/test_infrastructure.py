@@ -1,4 +1,3 @@
-#-*- coding: utf-8 -*-
 
 # Consolidated infrastructure tests that previously lived in both
 # test_integration.py and test_mock.py with near-identical logic.
@@ -6,13 +5,14 @@
 # Each test category has a base class parameterized by driver class,
 # with concrete HSQLDB and MockDriver subclasses.
 
-import jaydebeapiarrow
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+
+import jaydebeapiarrow
 
 try:
     from test._base import _THIS_DIR
@@ -29,7 +29,7 @@ def _connect(*args, **kwargs):
 # Fork safety tests (legacy issue #232)
 # ---------------------------------------------------------------------------
 
-class _ForkSafetyTestBase(object):
+class _ForkSafetyTestBase:
     """Base class for fork-after-JVM-start guard tests."""
 
     DRIVER_CLASS = None  # override in subclass
@@ -75,7 +75,7 @@ class ForkSafetyMockTest(_ForkSafetyTestBase, unittest.TestCase):
 # JAR path with spaces tests (issue #86)
 # ---------------------------------------------------------------------------
 
-class _JarPathSpacesTestBase(object):
+class _JarPathSpacesTestBase:
     """Base class for JAR file paths containing spaces."""
 
     def _find_jar(self):
@@ -159,7 +159,7 @@ class JarPathSpacesHsqldbTest(_JarPathSpacesTestBase, unittest.TestCase):
 class JarPathSpacesMockTest(_JarPathSpacesTestBase, unittest.TestCase):
 
     def _find_jar(self):
-        for root, dirs, files in os.walk(_THIS_DIR):
+        for root, _dirs, files in os.walk(_THIS_DIR):
             for f in files:
                 if f.startswith('mockdriver') and f.endswith('.jar'):
                     return os.path.join(root, f)
@@ -176,7 +176,7 @@ class JarPathSpacesMockTest(_JarPathSpacesTestBase, unittest.TestCase):
 # Dynamic classpath tests
 # ---------------------------------------------------------------------------
 
-class _DynamicClasspathTestBase(object):
+class _DynamicClasspathTestBase:
     """Base class for experimental dynamic_classpath feature."""
 
     def _find_primary_jar(self):
@@ -349,7 +349,6 @@ class DynamicClasspathHsqldbTest(_DynamicClasspathTestBase, unittest.TestCase):
     def test_hsqldb_fails_without_dynamic_classpath(self):
         """Connecting to HSQLDB after JVM starts with only mock driver on classpath
         should fail — the HSQLDB driver is not available."""
-        hsqldb_jar = self._find_primary_jar()
         mock_dir = os.path.join(_THIS_DIR, 'mock-jars')
         mock_jar = None
         for f in os.listdir(mock_dir):
@@ -360,7 +359,7 @@ class DynamicClasspathHsqldbTest(_DynamicClasspathTestBase, unittest.TestCase):
             self.skipTest('mockdriver JAR not found')
 
         env = {**os.environ, 'CLASSPATH': mock_jar}
-        code = f'''
+        code = '''
 import jaydebeapiarrow
 
 # Start JVM with only the mock driver available
@@ -380,7 +379,7 @@ try:
     conn2.close()
     print('UNEXPECTED_SUCCESS')
 except Exception as e:
-    print(f'EXPECTED_FAIL: {{type(e).__name__}}')
+    print(f'EXPECTED_FAIL: {type(e).__name__}')
 '''
         result = subprocess.run(
             [sys.executable, '-c', code],
@@ -467,7 +466,7 @@ class DynamicClasspathMockTest(_DynamicClasspathTestBase, unittest.TestCase):
     """Tests using mock driver."""
 
     def _find_primary_jar(self):
-        for root, dirs, files in os.walk(_THIS_DIR):
+        for root, _dirs, files in os.walk(_THIS_DIR):
             for f in files:
                 if f.startswith('mockdriver') and f.endswith('.jar'):
                     return os.path.join(root, f)
@@ -760,7 +759,7 @@ class LoggingDefaultsTest(unittest.TestCase):
         return {k: v for k, v in os.environ.items() if k != 'CLASSPATH'}
 
     def _mock_jar(self):
-        for root, dirs, files in os.walk(_THIS_DIR):
+        for root, _dirs, files in os.walk(_THIS_DIR):
             for f in files:
                 if f.startswith('mockdriver') and f.endswith('.jar'):
                     return os.path.join(root, f)
@@ -886,7 +885,7 @@ class JulConfigInjectionTest(unittest.TestCase):
 # JPype reflection / type mapping tests (legacy #111)
 # ---------------------------------------------------------------------------
 
-class _ReflectionTestBase(object):
+class _ReflectionTestBase:
     """Base class for java.sql.Types reflection and DBAPITypeObject tests."""
 
     DRIVER_CLASS = None
@@ -927,7 +926,9 @@ class _ReflectionTestBase(object):
         """cursor.description should use correct type names from
         Reflection-based type mapping."""
         with self.conn.cursor() as cursor:
-            cursor.execute("CREATE TABLE test_reflect (id INTEGER, name VARCHAR(50), val DECIMAL(10,2))")
+            cursor.execute(
+                "CREATE TABLE test_reflect "
+                "(id INTEGER, name VARCHAR(50), val DECIMAL(10,2))")
             cursor.execute("INSERT INTO test_reflect VALUES (1, 'test', 3.14)")
             cursor.execute("SELECT * FROM test_reflect")
             desc = cursor.description

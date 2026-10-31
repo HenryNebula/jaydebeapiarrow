@@ -1,4 +1,3 @@
-#-*- coding: utf-8 -*-
 
 # Copyright 2015 Bastian Bowe
 #
@@ -17,18 +16,14 @@
 # License along with JayDeBeApi.  If not, see
 # <http://www.gnu.org/licenses/>.
 
-import jaydebeapiarrow
+import threading
+import unittest
 from datetime import datetime
 from decimal import Decimal
-import os
-import sys
-import threading
 from functools import partial
 
-try:
-    import unittest2 as unittest
-except ImportError:
-    import unittest
+import jaydebeapiarrow
+
 
 class MockTest(unittest.TestCase):
 
@@ -44,18 +39,6 @@ class MockTest(unittest.TestCase):
                                 'TIME_WITH_TIMEZONE', 'TIMESTAMP_WITH_TIMEZONE'}
 
     def test_all_db_api_type_objects_have_valid_mapping(self):
-        extra_type_mappings = {
-            'DATE': 'getDate',
-            'TIME': 'getTime',
-            'TIMESTAMP': 'getTimestamp',
-            'STRING': 'getString',
-            'TEXT': 'getString',
-            'BINARY': 'getBinary',
-            'NUMBER': 'getInt',
-            'FLOAT': 'getDouble',
-            'DECIMAL': 'getBigDecimal',
-            'ROWID': 'getRowID'
-        }
         for db_api_type in jaydebeapiarrow.__dict__.values():
             if isinstance(db_api_type, jaydebeapiarrow.DBAPITypeObject):
                 for jsql_type_name in db_api_type.values:
@@ -207,8 +190,8 @@ class MockTest(unittest.TestCase):
         """Declared 39-76 digit decimals flow as decimal256 through
         fetch_arrow_table (issue #125: pyarrow's JVM bridge mapped every
         Decimal to decimal128 and raised on precision > 38)."""
-        import pyarrow as pa
         import jpype
+        import pyarrow as pa
         BigDecimal = jpype.JClass("java.math.BigDecimal")
         value = BigDecimal("12345678901234567890.123456789012345678901234567890")
         self.conn.jconn.mockSingleRowDecimalResult(value, 50, 30)
@@ -222,8 +205,8 @@ class MockTest(unittest.TestCase):
 
     def test_fetch_arrow_batches_decimal256_native(self):
         """fetch_arrow_batches carries decimal256 natively too (issue #125)."""
-        import pyarrow as pa
         import jpype
+        import pyarrow as pa
         BigDecimal = jpype.JClass("java.math.BigDecimal")
         value = BigDecimal("12345678901234567890.123456789012345678901234567890")
         self.conn.jconn.mockSingleRowDecimalResult(value, 50, 30)
@@ -1456,7 +1439,8 @@ class MockTest(unittest.TestCase):
             self.assertIsNone(cursor.lastrowid)
 
     def test_lastrowid_none_after_insert(self):
-        """lastrowid is None after INSERT with no auto-generated keys (mock has no identity column)."""
+        """lastrowid is None after INSERT with no auto-generated keys
+        (mock has no identity column)."""
         self.conn.jconn.mockBigDecimalResult(1, 0)
         with self.conn.cursor() as cursor:
             cursor.execute("dummy stmt")
@@ -1547,7 +1531,7 @@ class ParallelConnectTest(unittest.TestCase):
             try:
                 conn = jaydebeapiarrow.connect(
                     'org.jaydebeapi.mockdriver.MockDriver',
-                    'jdbc:jaydebeapi://dummyurl%d' % idx)
+                    f'jdbc:jaydebeapi://dummyurl{idx}')
                 # Verify the connection is usable
                 self.assertIsNotNone(conn)
                 conn.close()

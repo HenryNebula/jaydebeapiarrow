@@ -1,4 +1,3 @@
-#-*- coding: utf-8 -*-
 
 # Regression test for issue #115: DBAPITypeObject must be hashable so
 # SQLAlchemy 2.x can use it as a cache key for result-set processors.
@@ -7,13 +6,11 @@
 # SQLAlchemy's cursor result metadata construction.
 
 import unittest
-
 from decimal import Decimal
 
 import jaydebeapiarrow
 
 try:
-    import sqlalchemy
     from sqlalchemy import create_engine, text
     from sqlalchemy.dialects import registry as _dialect_registry
     from sqlalchemy.engine.default import DefaultDialect
@@ -81,8 +78,7 @@ class SQLAlchemyIntegrationTest(unittest.TestCase):
             cursor.execute("INSERT INTO sa_test VALUES (2, 'bob', 12.90)")
 
         self.engine = create_engine(
-            'jaydebeapiarrow:///?jdbc_url=%s&driver_class=%s'
-            % (_JDBC_URL, _DRIVER_CLASS),
+            f'jaydebeapiarrow:///?jdbc_url={_JDBC_URL}&driver_class={_DRIVER_CLASS}',
             poolclass=NullPool,
         )
 

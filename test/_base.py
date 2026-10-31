@@ -1,4 +1,3 @@
-#-*- coding: utf-8 -*-
 
 # Copyright 2010 Bastian Bowe
 #
@@ -17,40 +16,39 @@
 # License along with JayDeBeApi.  If not, see
 # <http://www.gnu.org/licenses/>.
 
-import jaydebeapiarrow
 import os
-import unittest
-
-from decimal import Decimal
 from datetime import datetime
+from decimal import Decimal
+
+import jaydebeapiarrow
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-class IntegrationTestBase(object):
+class IntegrationTestBase:
 
     JDBC_SUPPORT_TEMPORAL_TYPE = True
 
     def _cast_datetime(self, datetime_str, fmt=r'%Y-%m-%d %H:%M:%S'):
-        if self.JDBC_SUPPORT_TEMPORAL_TYPE and type(datetime_str) == str:
+        if self.JDBC_SUPPORT_TEMPORAL_TYPE and type(datetime_str) is str:
             return datetime.strptime(datetime_str, fmt)
         else:
             return datetime_str
 
     def _cast_time(self, time_str, fmt=r'%H:%M:%S'):
-        if self.JDBC_SUPPORT_TEMPORAL_TYPE and type(time_str) == str:
+        if self.JDBC_SUPPORT_TEMPORAL_TYPE and type(time_str) is str:
             return datetime.strptime(time_str, fmt).time()
         else:
             return time_str
 
     def _cast_date(self, date_str, fmt=r'%Y-%m-%d'):
-        if self.JDBC_SUPPORT_TEMPORAL_TYPE and type(date_str) == str:
+        if self.JDBC_SUPPORT_TEMPORAL_TYPE and type(date_str) is str:
             return datetime.strptime(date_str, fmt).date()
         else:
             return date_str
 
     def sql_file(self, filename):
-        f = open(filename, 'r')
+        f = open(filename)
         try:
             lines = f.readlines()
         finally:
@@ -104,6 +102,7 @@ class IntegrationTestBase(object):
         """Suppress noisy Java loggers from Drill, Trino, etc."""
         try:
             import jpype
+
             from jaydebeapiarrow import _is_jvm_started
             if not _is_jvm_started():
                 return
@@ -246,7 +245,7 @@ class IntegrationTestBase(object):
         dbl_col = 3.5
         opened_at = self.dbapi.Date(1908, 2, 27)
         valid = True
-        product_name = u'Savings account'
+        product_name = 'Savings account'
         parms = (account_id, account_no, balance, blocking, dbl_col,
                  opened_at, valid, product_name)
         with self.conn.cursor() as cursor:
@@ -390,7 +389,7 @@ class IntegrationTestBase(object):
     def test_execute_type_blob(self):
         stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, " \
                "STUFF) values (?, ?, ?, ?)"
-        binary_stuff = 'abcdef'.encode('UTF-8')
+        binary_stuff = b'abcdef'
         account_id = self.dbapi.Timestamp(2009, 9, 11, 14, 15, 22, 123450)
         stuff = self.dbapi.Binary(binary_stuff)
         parms = (account_id, 20, 13.1, stuff)
