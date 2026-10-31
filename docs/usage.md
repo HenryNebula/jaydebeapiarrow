@@ -288,6 +288,49 @@ Since dynamic loading became the default for already-running JVMs (see [Starting
 !!! warning "Experimental"
     This feature is experimental and may change in future versions.
 
+## Logging
+
+When `connect()` starts the JVM, Java-side logging is configured for you:
+
+- SLF4J is routed into `java.util.logging` (JUL) — the bundled extension JAR
+  carries the `slf4j-jdk14` binding, so Arrow, netty and JDBC-driver logs all
+  flow through JUL.
+- The JVM receives `-Djava.util.logging.config.file=` pointing at a packaged
+  `logging.properties` with root level `WARNING` and a single-line console
+  format. INFO chatter (`org.apache.arrow.memory ...`) is off by default;
+  warnings and errors still print to stderr.
+
+Bring your own JUL config to change level or format — the default injection is
+skipped as soon as you pass `java.util.logging.config.file` (or `.class`)
+yourself:
+
+```python
+conn = jaydebeapiarrow.connect(
+    "org.postgresql.Driver",
+    "jdbc:postgresql://host:5432/db",
+    ["user", "password"],
+    jvm_args=["-Djava.util.logging.config.file=/path/to/logging.properties"],
+)
+```
+
+The packaged file (at `site-packages/jaydebeapiarrow/logging.properties`) is a
+good template. As with all `jvm_args`, it only takes effect on the `connect()`
+that starts the JVM.
+
+!!! note "Pre-started JVMs are untouched"
+    The default is injected only when `connect()` starts the JVM. If you call
+    `jpype.startJVM()` yourself, configure `java.util.logging` however you like.
+
+!!! warning "Bundled SLF4J binding"
+    The extension JAR contains an SLF4J-to-JUL binding. Adding another binding
+    (Logback, `log4j-slf4j2-impl`, ...) to the classpath makes SLF4J warn about
+    multiple providers and pick one, following classpath order (`jars=` first,
+    then `CLASSPATH`, then the bundled extension). Passing a binding via `jars=`
+    does **not** replace the bundled one — use the `CLASSPATH` environment
+    variable or your own `startJVM()` for that.
+
+For quick debug output from the JDBC bridge itself, see [Debugging](#debugging).
+
 ## Debugging
 
 Enable Java-level debug logging from the JDBC bridge:

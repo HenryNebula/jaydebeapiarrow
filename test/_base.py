@@ -26,12 +26,6 @@ from datetime import datetime
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
-_SUPPRESS_LOGGING_ARGS = [
-    '-Dorg.slf4j.simpleLogger.defaultLogLevel=off',
-    '-Djava.util.logging.config.file=%s' % os.path.join(
-        os.path.dirname(jaydebeapiarrow.__file__), 'logging.properties'),
-]
-
 
 class IntegrationTestBase(object):
 
@@ -99,9 +93,10 @@ class IntegrationTestBase(object):
 
     @staticmethod
     def _quiet_connect(*args, **kwargs):
-        """Wrapper around jaydebeapiarrow.connect() that silences Java
-        loggers (slf4j-simple and java.util.logging) on the first call."""
-        kwargs.setdefault('jvm_args', _SUPPRESS_LOGGING_ARGS)
+        """Passthrough to jaydebeapiarrow.connect(); kept as a seam for
+        subclasses.  Java loggers are quieted by the library's own default
+        (packaged logging.properties at WARNING, injected when connect()
+        starts the JVM) plus _suppress_java_noise() below."""
         return jaydebeapiarrow.connect(*args, **kwargs)
 
     @staticmethod
