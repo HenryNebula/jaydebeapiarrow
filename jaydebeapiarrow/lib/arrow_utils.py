@@ -1,6 +1,3 @@
-import sys, traceback
-import tempfile
-from itertools import islice
 
 import pyarrow as pa
 from pyarrow.cffi import ffi as arrow_c
@@ -94,58 +91,17 @@ def _find_decimal_conversion_message(exc):
     return None
 
 
-def read_rows_from_arrow_iterator(it, nrows=-1):
-    rows = []
-
-    nrows_remaining = nrows
-
-    try:
-        for root in it:
-            if root is None:
-                break
-            try:
-                batch = _import_batch_via_cdata(root).to_pylist()
-                _rows = [tuple(r.values()) for r in batch]
-                if nrows_remaining > 0:
-                    _rows = _rows[:min(len(_rows), nrows_remaining)]
-                    nrows_remaining -= len(_rows)
-                else:
-                    if nrows > 0:
-                        break
-                rows.extend(_rows)
-            finally:
-                root.clear()
-
-    except Exception as e:
-        if _handle_sql_exception is not None:
-            _handle_sql_exception()
-        traceback.print_exc()
-        print(f"Error converting iterator to rows: {e}")
-        raise e
-
-    finally:
-        # Close iterator to release Arrow allocator and JDBC resources
-        try:
-            it.close()
-        except Exception:
-            pass
-
-    if nrows > 0:
-        assert nrows >= len(rows), f"Mismatched number rows: {len(rows)} (expected {nrows})"
-    return rows
-
-
 def create_pyarrow_batches_from_list(rows):
     if not rows:
         return []
-    
+
     if not isinstance(rows[0], (list, tuple)):
         # wrap single column values in a list
         rows = [rows, ]
 
     n_cols = len(rows[0])
     column_wise = [[] for _ in range(n_cols)]
-    
+
     for r_idx, row in enumerate(rows):
         # Shape Check: Ensure consistency across all rows
         if len(row) != n_cols:
@@ -158,7 +114,7 @@ def create_pyarrow_batches_from_list(rows):
             column_wise[c_idx].append(col)
 
     batch = pa.RecordBatch.from_pydict(
-        {"col_{}".format(i): column_wise[i] for i in range(n_cols)}
+        {f"col_{i}": column_wise[i] for i in range(n_cols)}
     )
     return [batch, ]
 

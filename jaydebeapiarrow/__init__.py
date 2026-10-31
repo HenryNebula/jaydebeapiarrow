@@ -1,5 +1,3 @@
-#-*- coding: utf-8 -*-
-
 # Copyright 2010-2015 Bastian Bowe
 #
 # This file is part of JayDeBeApi.
@@ -7,12 +5,12 @@
 # it under the terms of the GNU Lesser General Public License as
 # published by the Free Software Foundation, either version 3 of the
 # License, or (at your option) any later version.
-# 
+#
 # JayDeBeApi is distributed in the hope that it will be useful, but
 # WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
 # Lesser General Public License for more details.
-# 
+#
 # You should have received a copy of the GNU Lesser General Public
 # License along with JayDeBeApi.  If not, see
 # <http://www.gnu.org/licenses/>.
@@ -21,29 +19,28 @@
 # 1. Remove py2 & Jython support
 # 2. Enforce typing for Decimal and temporal types
 
+import datetime
+import glob
 import importlib.metadata
+import os
 import re
+import sys
+import threading
+import time
+import warnings
+from decimal import Decimal
+
+from jaydebeapiarrow.lib.arrow_utils import (
+    _import_batch_via_cdata,
+    add_pyarrow_batches_to_statement,
+    convert_jdbc_rs_to_arrow_iterator,
+    create_pyarrow_batches_from_list,
+    fetch_next_batch,
+)
 
 __version__ = importlib.metadata.version("JayDeBeApiArrow")
 _ver_match = re.match(r"^(\d+)\.(\d+)\.(\d+)", __version__)
 __version_info__ = tuple(int(x) for x in _ver_match.groups()) if _ver_match else (0, 0, 0)
-
-import datetime
-from decimal import Decimal
-import glob
-import os
-import threading
-import time
-import sys
-import warnings
-
-from jaydebeapiarrow.lib.arrow_utils import \
-    convert_jdbc_rs_to_arrow_iterator, \
-    read_rows_from_arrow_iterator, \
-    create_pyarrow_batches_from_list, \
-    add_pyarrow_batches_to_statement, \
-    fetch_next_batch, \
-    _import_batch_via_cdata
 
 
 def _is_jvm_started():
@@ -81,6 +78,7 @@ def set_debug(enabled=True):
     Args:
         enabled: True to enable debug logging, False to disable.
     """
+    import jpype
     if not _is_jvm_started():
         return
     Level = jpype.JClass("java.util.logging.Level")
@@ -102,9 +100,6 @@ def reraise(tp, value, tb=None):
         raise value.with_traceback(tb)
     raise value
 
-
-# Mapping from java.sql.Types attribute name to attribute value
-_jdbc_name_to_const = None
 
 # Mapping from java.sql.Types attribute constant value to it's attribute name
 _jdbc_const_to_name = None
@@ -322,6 +317,7 @@ def _resolve_jdbc_utils():
     """
     global _jdbc_utils_dynamic_class, _jdbc_utils_dynamic_loader
     import jpype
+
     from jaydebeapiarrow.lib import arrow_utils
 
     loader = None
@@ -370,10 +366,9 @@ def _default_jul_config_arg(jvm_args):
     (config.file or config.class) via jvm_args."""
     for arg in jvm_args or []:
         for prop in _JUL_CONFIG_PROPERTIES:
-            if arg.startswith('-D%s=' % prop):
+            if arg.startswith(f'-D{prop}='):
                 return []
-    return ['-Djava.util.logging.config.file=%s'
-            % _DEFAULT_LOGGING_PROPERTIES]
+    return [f'-Djava.util.logging.config.file={_DEFAULT_LOGGING_PROPERTIES}']
 
 
 def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs, jvm_args=None, experimental=None):
@@ -386,11 +381,11 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs, jvm_args=None,
         if not _experimental.get('dynamic_classpath'):
             raise InterfaceError(
                 "Cannot use jaydebeapiarrow in a forked process. "
-                "The JVM was started in the parent process (PID %d) but this is "
-                "PID %d. JPype does not support fork after JVM start. "
-                "Move the connect() call after the fork, or use a "
+                f"The JVM was started in the parent process (PID {_jvm_started_pid}) "
+                f"but this is PID {os.getpid()}. JPype does not support fork after "
+                "JVM start. Move the connect() call after the fork, or use a "
                 "post-fork-spawn worker model (e.g. gunicorn --preload with "
-                "lazy connections)." % (_jvm_started_pid, os.getpid())
+                "lazy connections)."
             )
 
     # Brief lock: decide who starts the JVM (if needed).
@@ -422,16 +417,14 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs, jvm_args=None,
             if libs:
                 # path to shared libraries
                 libs_path = os.path.pathsep.join(libs)
-                args.append('-Djava.library.path=%s' % libs_path)
+                args.append(f'-Djava.library.path={libs_path}')
 
             # Known issue: some JDBC drivers (notably IBM Db2) use the JVM's
             # default charset for string conversion.  When the default is not
-            # UTF-8, non-ASCII characters (German umlauts, CJK, emoji) cause
-            # CharConversionException during result-set traversal.  Users who
-            # encounter this should pass jvm_args=['-Dfile.encoding=UTF-8']
-            # when calling connect().
-            # TODO: document this encoding requirement in user-facing docs
-            # and consider exposing a dedicated encoding parameter in connect().
+            # UTF-8, non-ASCII characters cause CharConversionException during
+            # result-set traversal — see the "Non-ASCII characters garbled"
+            # section of the usage docs for the -Dfile.encoding=UTF-8
+            # workaround.
 
             # Add-opens for Apache Arrow on Java 9+
             args.append('--add-opens=java.base/java.nio=ALL-UNNAMED')
@@ -445,8 +438,6 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs, jvm_args=None,
             # User-supplied extra JVM arguments
             args.extend(jvm_args or [])
 
-            # jvm_path = ('/usr/lib/jvm/java-6-openjdk'
-            #             '/jre/lib/i386/client/libjvm.so')
             jvm_path = jpype.getDefaultJVMPath()
             global old_jpype
             if hasattr(jpype, '__version__'):
@@ -485,9 +476,11 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs, jvm_args=None,
         jpype.java.lang.Thread.attach()
         jpype.java.lang.Thread.currentThread().setContextClassLoader(jpype.java.lang.ClassLoader.getSystemClassLoader())
     try:
-        import pyarrow.jvm
+        import pyarrow.jvm  # noqa: F401 -- probe: verifies the JVM bridge is usable
     except ImportError as e:
-        raise RuntimeError(f"Failed to import pyarrow.jvm ({e}). Looks like JVM is not started. Thisis required for jaydebeapiarrow to work.")
+        raise RuntimeError(
+            f"Failed to import pyarrow.jvm ({e}). Looks like JVM is not "
+            "started. This is required for jaydebeapiarrow to work.") from e
 
     # Resolve the extension's JDBCUtils (dynamically loading the packaged
     # extension jar when the JVM was started without it) and fail fast when
@@ -508,10 +501,10 @@ def _jdbc_connect_jpype(jclassname, url, driver_args, jars, libs, jvm_args=None,
                 _dynamic_load_driver(jclassname, jars)
             else:
                 raise TypeError(
-                    "Class %s is not found. It is not on the JVM classpath "
+                    f"Class {jclassname} is not found. It is not on the JVM classpath "
                     "and no jars were given to load it from. If you start "
                     "the JVM yourself, pass the driver JAR via jars= or put "
-                    "it on the classpath before startJVM()." % jclassname
+                    "it on the classpath before startJVM()."
                 ) from exc
 
     if isinstance(driver_args, dict):
@@ -572,7 +565,8 @@ def _jar_glob(item):
     if item.endswith('*'):
         jars = []
         for p in ['', '/**/']:
-            jars.extend(glob.glob('%s' % str(item).rstrip("*") + p + "*.[jJ][aA][rR]", recursive=True))
+            pattern = f"{str(item).rstrip('*')}{p}*.[jJ][aA][rR]"
+            jars.extend(glob.glob(pattern, recursive=True))
         return jars
     else:
         return [item]
@@ -599,7 +593,7 @@ apilevel = '2.0'
 threadsafety = 1
 paramstyle = 'qmark'
 
-class DBAPITypeObject(object):
+class DBAPITypeObject:
     _mappings = {}
     def __init__(self, group_name, *values):
         """Construct new DB-API 2.0 type object.
@@ -608,7 +602,7 @@ class DBAPITypeObject(object):
         self.group_name = group_name
         for type_name in values:
             if type_name in DBAPITypeObject._mappings:
-                raise ValueError("Non unique mapping for type '%s'" % type_name)
+                raise ValueError(f"Non unique mapping for type '{type_name}'")
             DBAPITypeObject._mappings[type_name] = self
     def __eq__(self, other):
         if isinstance(other, DBAPITypeObject):
@@ -625,7 +619,7 @@ class DBAPITypeObject(object):
     def __ne__(self, other):
         return not self.__eq__(other)
     def __repr__(self):
-        return 'DBAPITypeObject(%s)' % ", ".join([repr(i) for i in self.values])
+        return 'DBAPITypeObject({})'.format(", ".join([repr(i) for i in self.values]))
     @classmethod
     def _map_jdbc_type_to_dbapi(cls, jdbc_type_const):
         global _jdbc_const_to_name
@@ -651,14 +645,17 @@ class DBAPITypeObject(object):
         try:
             type_name = _jdbc_const_to_name[jdbc_type_const]
         except (KeyError, TypeError):
-            warnings.warn("Unknown JDBC type with constant value %s. "
-                          "Using None as a default type_code." % str(jdbc_type_const))
+            warnings.warn(
+                f"Unknown JDBC type with constant value {jdbc_type_const}. "
+                "Using None as a default type_code.", stacklevel=3)
             return None
         try:
             return cls._mappings[type_name]
         except KeyError:
-            warnings.warn("No type mapping for JDBC type '%s' (constant value %d). "
-                          "Using None as a default type_code." % (type_name, jdbc_type_const))
+            warnings.warn(
+                f"No type mapping for JDBC type '{type_name}' "
+                f"(constant value {jdbc_type_const}). "
+                "Using None as a default type_code.", stacklevel=3)
             return None
 
 
@@ -679,7 +676,8 @@ DATE = DBAPITypeObject('DATE', 'DATE')
 
 TIME = DBAPITypeObject('TIME', 'TIME')
 
-DATETIME = DBAPITypeObject('TIMESTAMP', 'TIMESTAMP', 'TIMESTAMP_WITH_TIMEZONE', 'TIME_WITH_TIMEZONE')
+DATETIME = DBAPITypeObject('TIMESTAMP', 'TIMESTAMP',
+                           'TIMESTAMP_WITH_TIMEZONE', 'TIME_WITH_TIMEZONE')
 
 ROWID = DBAPITypeObject('ROWID', 'ROWID')
 
@@ -728,8 +726,6 @@ Date = datetime.date
 Time = datetime.time
 Timestamp = datetime.datetime
 
-# Date = datetime.date
-
 def DateFromTicks(ticks):
     return Date(*time.localtime(ticks)[:3])
 
@@ -740,7 +736,8 @@ def TimestampFromTicks(ticks):
     return Timestamp(*time.localtime(ticks)[:6])
 
 # DB-API 2.0 Module Interface connect constructor
-def connect(jclassname, url, driver_args=None, jars=None, libs=None, jvm_args=None, experimental=None):
+def connect(jclassname, url, driver_args=None, jars=None, libs=None,
+            jvm_args=None, experimental=None):
     """Open a connection to a database using a JDBC driver and return
     a Connection instance.
 
@@ -783,10 +780,9 @@ def connect(jclassname, url, driver_args=None, jars=None, libs=None, jvm_args=No
     if not isinstance(url, str):
         raise ProgrammingError(
             "The 'url' parameter must be a JDBC connection string, "
-            "not %s. If you meant to pass connection credentials, "
+            f"not {type(url).__name__}. If you meant to pass connection credentials, "
             "use the 'driver_args' parameter. "
             "Usage: connect(jclassname, url, driver_args=None, jars=None, libs=None)"
-            % type(url).__name__
         )
     if isinstance(driver_args, str):
         driver_args = [ driver_args ]
@@ -804,11 +800,12 @@ def connect(jclassname, url, driver_args=None, jars=None, libs=None, jvm_args=No
         libs = []
     if experimental is None:
         experimental = {}
-    jconn = _jdbc_connect(jclassname, url, driver_args, jars, libs, jvm_args=jvm_args, experimental=experimental)
+    jconn = _jdbc_connect(jclassname, url, driver_args, jars, libs,
+                          jvm_args=jvm_args, experimental=experimental)
     return Connection(jconn, jclassname)
 
 # DB-API 2.0 Connection Object
-class Connection(object):
+class Connection:
 
     Error = Error
     Warning = Warning
@@ -840,7 +837,7 @@ class Connection(object):
             return
         try:
             self.jconn.commit()
-        except:
+        except Exception:
             _handle_sql_exception()
 
     def rollback(self):
@@ -848,7 +845,7 @@ class Connection(object):
             return
         try:
             self.jconn.rollback()
-        except:
+        except Exception:
             _handle_sql_exception()
 
     def cursor(self):
@@ -929,7 +926,7 @@ def _infer_decimal_widths(strings):
     return max_digits, max_scale
 
 
-class Cursor(object):
+class Cursor:
 
     _rs = None
     _meta = None
@@ -995,7 +992,7 @@ class Cursor(object):
         if self._iter:
             try:
                 self._iter.close()
-            except:
+            except Exception:
                 pass
         self._iter = None
         self._buffer = []
@@ -1010,20 +1007,15 @@ class Cursor(object):
         self._decimal_cols = None
         self._decimal_info = None
 
-    # def _set_stmt_parms(self, prep_stmt, parameters):
-    #     for i in range(len(parameters)):
-    #         # print (i, parameters[i], type(parameters[i]))
-    #         prep_stmt.setObject(i + 1, parameters[i])
-
     def _stringify_params(self, params, is_batch):
         if not params:
             return params
-        
+
         def _to_str(x):
             if isinstance(x, (datetime.date, datetime.time, datetime.datetime)):
                 return str(x)
             return x
-            
+
         if is_batch:
             # params is a sequence of sequences
             return [[_to_str(p) for p in row] for row in params]
@@ -1156,12 +1148,12 @@ class Cursor(object):
         except Exception:
             try:
                 self._prep = self._connection.jconn.prepareStatement(operation)
-            except:
+            except Exception:
                 _handle_sql_exception()
         self._set_stmt_parms(self._prep, parameters, is_batch=False)
         try:
             is_rs = self._prep.execute()
-        except:
+        except Exception:
             _handle_sql_exception()
         if is_rs:
             self._rs = self._prep.getResultSet()
@@ -1177,7 +1169,7 @@ class Cursor(object):
                         self.lastrowid = None
             except Exception:
                 pass
-        # self._prep.getWarnings() ???
+
 
     def executemany(self, operation, seq_of_parameters):
         self._close_last()
@@ -1188,14 +1180,13 @@ class Cursor(object):
         except Exception:
             try:
                 self._prep = self._connection.jconn.prepareStatement(operation)
-            except:
+            except Exception:
                 _handle_sql_exception()
         self._set_stmt_parms(self._prep, seq_of_parameters, is_batch=True)
         try:
             update_counts = self._prep.executeBatch()
-        except:
+        except Exception:
             _handle_sql_exception()
-        # self._prep.getWarnings() ???
         # Some drivers return null instead of an int[] (e.g. the
         # Mockito-backed MockDriver's unstubbed executeBatch); PEP 249 says
         # rowcount is -1 when the count is not determinable by the interface.
@@ -1504,7 +1495,7 @@ class Cursor(object):
             raise ImportError(
                 "fetch_df() requires pandas. "
                 "Install it with: pip install jaydebeapiarrow[pandas]"
-            )
+            ) from None
         table = self.fetch_arrow_table()
         df = table.to_pandas()
         # Columns still utf8 (beyond decimal256) become Decimal objects too,

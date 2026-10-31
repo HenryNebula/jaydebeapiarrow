@@ -52,9 +52,20 @@ dev = [
     "psycopg2-binary>=2.9.12",
     "pytest>=8.4.2",
     "pytest-xdist>=3.8.0",
+    "ruff>=0.14",
     "SQLAlchemy>=2.0.0",
     "unittest-xml-reporting",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+# E/W pycodestyle, F pyflakes (real errors), I import sorting, UP pyupgrade,
+# B bugbear.  Deliberately NOT enabled: BLE/S/TRY/PL -- the JNI bridge
+# legitimately uses broad excepts (Java exception translation) and asserts.
+select = ["E", "F", "W", "I", "UP", "B"]
 
 [tool.bumpversion]
 current_version = "2.1.7"
