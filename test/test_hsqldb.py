@@ -1,10 +1,10 @@
-#-*- coding: utf-8 -*-
 
-import jaydebeapiarrow
 import os
 import time
 import unittest
 from decimal import Decimal
+
+import jaydebeapiarrow
 
 try:
     import jaydebeapi
@@ -12,9 +12,9 @@ except ImportError:
     jaydebeapi = None
 
 try:
-    from test._base import IntegrationTestBase, _THIS_DIR, _SUPPRESS_LOGGING_ARGS
+    from test._base import _THIS_DIR, IntegrationTestBase
 except ImportError:
-    from _base import IntegrationTestBase, _THIS_DIR, _SUPPRESS_LOGGING_ARGS
+    from _base import _THIS_DIR, IntegrationTestBase
 
 
 class HsqldbTest(IntegrationTestBase, unittest.TestCase):
@@ -33,14 +33,30 @@ class HsqldbTest(IntegrationTestBase, unittest.TestCase):
         self.sql_file(os.path.join(_THIS_DIR, 'data', 'insert.sql'))
 
 
+class CursorDescriptionTest(unittest.TestCase):
+    """PEP 249 cursor.description conformance (issue #132)."""
+
+    def test_description_is_none_before_first_execute(self):
+        """A fresh cursor's description is None (PEP 249: "This attribute
+        will be None ... if the cursor has not executed an operation yet"),
+        not an AttributeError from a missing _meta attribute."""
+        conn = jaydebeapiarrow.connect('org.hsqldb.jdbcDriver',
+                                       'jdbc:hsqldb:mem:desc_before_execute',
+                                       ['SA', ''])
+        try:
+            with conn.cursor() as cursor:
+                self.assertIsNone(cursor.description)
+        finally:
+            conn.close()
+
+
 class HsqldbMultipleConnectionsTest(unittest.TestCase):
     """Test that multiple sequential and simultaneous connections work (issue #97)."""
 
     def _connect(self, db_name):
         driver = 'org.hsqldb.jdbcDriver'
         url = f'jdbc:hsqldb:mem:{db_name}'
-        return jaydebeapiarrow.connect(driver, url, ['SA', ''],
-                                       jvm_args=_SUPPRESS_LOGGING_ARGS)
+        return jaydebeapiarrow.connect(driver, url, ['SA', ''])
 
     def test_sequential_connections(self):
         """Connect, query, close, then connect again — each cycle should succeed."""
@@ -76,8 +92,7 @@ class HsqldbHighPrecisionNumericTest(unittest.TestCase):
     def setUp(self):
         self.conn = jaydebeapiarrow.connect(
             'org.hsqldb.jdbcDriver', 'jdbc:hsqldb:mem:hpnumeric',
-            ['SA', ''],
-            jvm_args=_SUPPRESS_LOGGING_ARGS)
+            ['SA', ''])
 
     def tearDown(self):
         self.conn.close()
@@ -200,8 +215,7 @@ class HsqldbArrayTypeTest(unittest.TestCase):
     def setUp(self):
         self.conn = jaydebeapiarrow.connect(
             'org.hsqldb.jdbcDriver', 'jdbc:hsqldb:mem:arraytest',
-            ['SA', ''],
-            jvm_args=_SUPPRESS_LOGGING_ARGS)
+            ['SA', ''])
         with self.conn.cursor() as cursor:
             cursor.execute(
                 "CREATE TABLE test_arrays ("
@@ -309,8 +323,7 @@ class HsqldbDecimalArrayTest(unittest.TestCase):
     def setUp(self):
         self.conn = jaydebeapiarrow.connect(
             'org.hsqldb.jdbcDriver', 'jdbc:hsqldb:mem:decarraytest',
-            ['SA', ''],
-            jvm_args=_SUPPRESS_LOGGING_ARGS)
+            ['SA', ''])
         with self.conn.cursor() as cursor:
             cursor.execute(
                 "CREATE TABLE test_dec_arrays ("
@@ -459,6 +472,24 @@ class HsqldbDecimalArrayTest(unittest.TestCase):
         self.assertEqual(
             list(df.iloc[0, 0]), [Decimal('1.5000'), Decimal('2.2500')])
 
+    def test_beyond_decimal256_array_fetch_df(self):
+        """fetch_df rebuilds Decimal elements even when they exceed
+        decimal256 and stay utf8 through the table cast (#121). to_pandas()
+        hands list cells back as ndarrays, which the rebuild must handle."""
+        try:
+            import pandas  # noqa: F401
+        except ImportError:
+            self.skipTest("pandas not installed")
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT unbounded_vals FROM test_dec_arrays WHERE id = 2")
+            df = cursor.fetch_df()
+        cell = df.iloc[0, 0]
+        self.assertEqual(list(cell), [Decimal(self.BIG)])
+        self.assertTrue(
+            all(isinstance(e, Decimal) for e in cell),
+            f"elements must be Decimal, got {[type(e).__name__ for e in cell]}")
+
 
 class HsqldbFetchPerformanceTest(unittest.TestCase):
     """Relative speed vs the row-by-row JPype path (original jaydebeapi),
@@ -486,8 +517,7 @@ class HsqldbFetchPerformanceTest(unittest.TestCase):
                 'the performance regression tests')
         cls.conn = jaydebeapiarrow.connect(
             'org.hsqldb.jdbcDriver', 'jdbc:hsqldb:mem:perftest',
-            ['SA', ''],
-            jvm_args=_SUPPRESS_LOGGING_ARGS)
+            ['SA', ''])
         # Same in-memory DB through the row-by-row library, reusing the
         # running JVM.
         cls.legacy_conn = jaydebeapi.connect(
@@ -504,7 +534,7 @@ class HsqldbFetchPerformanceTest(unittest.TestCase):
                              ('id', 'int_val', 'double_val',
                               'str_val', 'dec_val'), cls.ROWS)
             cursor.execute('CREATE TABLE perf_hp (id BIGINT, val NUMERIC(1000, 64))')
-            cursor.execute('INSERT INTO perf_hp VALUES (1, %s)' % cls.HP_VALUE)
+            cursor.execute(f'INSERT INTO perf_hp VALUES (1, {cls.HP_VALUE})')
             cls._double_rows(cursor, 'perf_hp', ('id', 'val'), cls.ROWS)
 
     @classmethod
@@ -522,16 +552,16 @@ class HsqldbFetchPerformanceTest(unittest.TestCase):
         while count < target:
             step = min(count, target - count)
             select_list = ', '.join(
-                '%s + %d' % (col, count) if col == 'id' else col
+                f'{col} + {count}' if col == 'id' else col
                 for col in columns)
             cursor.execute(
-                'INSERT INTO %s SELECT %s FROM %s WHERE id <= %d'
-                % (table, select_list, table, step))
+                f'INSERT INTO {table} SELECT {select_list} FROM {table} '
+                f'WHERE id <= {step}')
             count += step
 
     def _fetchall(self, connection, table):
         with connection.cursor() as cursor:
-            cursor.execute('SELECT * FROM %s' % table)
+            cursor.execute(f'SELECT * FROM {table}')
             return cursor.fetchall()
 
     @staticmethod
@@ -575,7 +605,7 @@ class HsqldbFetchPerformanceTest(unittest.TestCase):
         self.assertGreaterEqual(
             speedup, required_speedup,
             'Arrow fetchall() lost its speedup over the JPype row-by-row '
-            'path (best of two rounds: %.2fx)' % speedup)
+            f'path (best of two rounds: {speedup:.2f}x)')
         return arrow_rows
 
     def test_fetchall_faster_than_jaydebeapi(self):

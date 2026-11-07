@@ -1,4 +1,3 @@
-#-*- coding: utf-8 -*-
 
 # Consolidated infrastructure tests that previously lived in both
 # test_integration.py and test_mock.py with near-identical logic.
@@ -6,7 +5,6 @@
 # Each test category has a base class parameterized by driver class,
 # with concrete HSQLDB and MockDriver subclasses.
 
-import jaydebeapiarrow
 import os
 import shutil
 import subprocess
@@ -14,15 +12,16 @@ import sys
 import tempfile
 import unittest
 
+import jaydebeapiarrow
+
 try:
-    from test._base import _THIS_DIR, _SUPPRESS_LOGGING_ARGS
+    from test._base import _THIS_DIR
 except ImportError:
-    from _base import _THIS_DIR, _SUPPRESS_LOGGING_ARGS
+    from _base import _THIS_DIR
 
 
 def _connect(*args, **kwargs):
-    """Wrapper that injects logging suppression JVM args on first connect."""
-    kwargs.setdefault('jvm_args', _SUPPRESS_LOGGING_ARGS)
+    """Thin wrapper around jaydebeapiarrow.connect()."""
     return jaydebeapiarrow.connect(*args, **kwargs)
 
 
@@ -30,7 +29,7 @@ def _connect(*args, **kwargs):
 # Fork safety tests (legacy issue #232)
 # ---------------------------------------------------------------------------
 
-class _ForkSafetyTestBase(object):
+class _ForkSafetyTestBase:
     """Base class for fork-after-JVM-start guard tests."""
 
     DRIVER_CLASS = None  # override in subclass
@@ -76,7 +75,7 @@ class ForkSafetyMockTest(_ForkSafetyTestBase, unittest.TestCase):
 # JAR path with spaces tests (issue #86)
 # ---------------------------------------------------------------------------
 
-class _JarPathSpacesTestBase(object):
+class _JarPathSpacesTestBase:
     """Base class for JAR file paths containing spaces."""
 
     def _find_jar(self):
@@ -160,7 +159,7 @@ class JarPathSpacesHsqldbTest(_JarPathSpacesTestBase, unittest.TestCase):
 class JarPathSpacesMockTest(_JarPathSpacesTestBase, unittest.TestCase):
 
     def _find_jar(self):
-        for root, dirs, files in os.walk(_THIS_DIR):
+        for root, _dirs, files in os.walk(_THIS_DIR):
             for f in files:
                 if f.startswith('mockdriver') and f.endswith('.jar'):
                     return os.path.join(root, f)
@@ -177,7 +176,7 @@ class JarPathSpacesMockTest(_JarPathSpacesTestBase, unittest.TestCase):
 # Dynamic classpath tests
 # ---------------------------------------------------------------------------
 
-class _DynamicClasspathTestBase(object):
+class _DynamicClasspathTestBase:
     """Base class for experimental dynamic_classpath feature."""
 
     def _find_primary_jar(self):
@@ -350,7 +349,6 @@ class DynamicClasspathHsqldbTest(_DynamicClasspathTestBase, unittest.TestCase):
     def test_hsqldb_fails_without_dynamic_classpath(self):
         """Connecting to HSQLDB after JVM starts with only mock driver on classpath
         should fail — the HSQLDB driver is not available."""
-        hsqldb_jar = self._find_primary_jar()
         mock_dir = os.path.join(_THIS_DIR, 'mock-jars')
         mock_jar = None
         for f in os.listdir(mock_dir):
@@ -361,7 +359,7 @@ class DynamicClasspathHsqldbTest(_DynamicClasspathTestBase, unittest.TestCase):
             self.skipTest('mockdriver JAR not found')
 
         env = {**os.environ, 'CLASSPATH': mock_jar}
-        code = f'''
+        code = '''
 import jaydebeapiarrow
 
 # Start JVM with only the mock driver available
@@ -381,7 +379,7 @@ try:
     conn2.close()
     print('UNEXPECTED_SUCCESS')
 except Exception as e:
-    print(f'EXPECTED_FAIL: {{type(e).__name__}}')
+    print(f'EXPECTED_FAIL: {type(e).__name__}')
 '''
         result = subprocess.run(
             [sys.executable, '-c', code],
@@ -468,7 +466,7 @@ class DynamicClasspathMockTest(_DynamicClasspathTestBase, unittest.TestCase):
     """Tests using mock driver."""
 
     def _find_primary_jar(self):
-        for root, dirs, files in os.walk(_THIS_DIR):
+        for root, _dirs, files in os.walk(_THIS_DIR):
             for f in files:
                 if f.startswith('mockdriver') and f.endswith('.jar'):
                     return os.path.join(root, f)
@@ -482,10 +480,412 @@ class DynamicClasspathMockTest(_DynamicClasspathTestBase, unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Externally started JVM tests (issue #128)
+# ---------------------------------------------------------------------------
+
+class ExternalJvmAutoloadTest(unittest.TestCase):
+    """connect() must work plug-and-play on a JVM the user started via raw
+    jpype.startJVM() with nothing on the classpath (issue #128)."""
+
+    def _run_in_subprocess(self, code, env=None):
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True, text=True, timeout=30,
+            cwd=os.path.dirname(os.path.dirname(__file__)),
+            env=env
+        )
+        return result.stdout.strip(), result.stderr.strip()
+
+    def _bare_env(self):
+        # No CLASSPATH so nothing leaks onto the JVM the test starts itself
+        return {k: v for k, v in os.environ.items() if k != 'CLASSPATH'}
+
+    def _hsqldb_jar(self):
+        jar_dir = os.path.join(_THIS_DIR, 'jars')
+        if not os.path.isdir(jar_dir):
+            self.skipTest('test/jars/ directory not found (run download_jdbc_drivers.sh)')
+        for f in os.listdir(jar_dir):
+            if 'hsqldb' in f.lower() and f.endswith('.jar'):
+                return os.path.join(jar_dir, f)
+        self.skipTest('HSQLDB JAR not found in test/jars/')
+
+    def test_autoload_on_externally_started_jvm(self):
+        """The issue #128 pattern: manual startJVM without classpath, then
+        connect(..., jars=...) with no experimental flag.  The driver jar
+        and the packaged Arrow extension must both load dynamically and a
+        full query round-trip must succeed."""
+        hsqldb_jar = self._hsqldb_jar()
+        code = f'''
+import jpype
+import jaydebeapiarrow
+
+jpype.startJVM(
+    jpype.getDefaultJVMPath(),
+    "--add-opens=java.base/java.nio=ALL-UNNAMED",
+    "--add-opens=java.base/java.lang=ALL-UNNAMED",
+    ignoreUnrecognized=True,
+    convertStrings=True,
+)
+
+conn = jaydebeapiarrow.connect(
+    "org.hsqldb.jdbcDriver",
+    "jdbc:hsqldb:mem:.",
+    ["SA", ""],
+    jars={repr(hsqldb_jar)},
+)
+cursor = conn.cursor()
+cursor.execute("CREATE TABLE t_autoload (id INTEGER, name VARCHAR(50))")
+cursor.execute("INSERT INTO t_autoload VALUES (1, 'hello'), (2, 'world')")
+cursor.execute("SELECT id, name FROM t_autoload ORDER BY id")
+rows = cursor.fetchall()
+cursor.close()
+conn.close()
+print(f"AUTOLOAD_OK: {{rows}}")
+'''
+        stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
+        self.assertEqual(stdout, "AUTOLOAD_OK: [(1, 'hello'), (2, 'world')]",
+                         f'Externally started JVM autoload failed.\n'
+                         f'stdout: {stdout}\nstderr: {stderr}')
+
+    def test_missing_add_opens_fails_fast(self):
+        """An externally started JVM without the Arrow --add-opens flags must
+        fail at connect() with guidance naming the required flag, not with a
+        confusing InaccessibleObjectException at first fetch.
+
+        JDK 16+ denies illegal access by default, so the fail-fast fires
+        there.  Older JDKs (8 has no JPMS, 9-15 default to
+        --illegal-access=permit) genuinely allow Arrow's reflection, so
+        connecting without the flags succeeds legitimately there."""
+        hsqldb_jar = self._hsqldb_jar()
+        code = f'''
+import jpype
+import jaydebeapiarrow
+
+jpype.startJVM(
+    jpype.getDefaultJVMPath(),
+    ignoreUnrecognized=True,
+    convertStrings=True,
+)
+
+# Ground truth for this JVM: is java.nio actually open to the unnamed
+# module holding the extension (no --add-opens passed)?
+urls = [jpype.java.io.File(j).toURI().toURL()
+        for j in jaydebeapiarrow._get_arrow_jar_paths()]
+loader = jpype.java.net.URLClassLoader(
+    urls, jpype.java.lang.ClassLoader.getSystemClassLoader())
+probe_open = jaydebeapiarrow._java_base_opens_nio(loader)
+print("PROBE_OPEN" if probe_open else "PROBE_CLOSED")
+
+try:
+    conn = jaydebeapiarrow.connect(
+        "org.hsqldb.jdbcDriver",
+        "jdbc:hsqldb:mem:.",
+        ["SA", ""],
+        jars={repr(hsqldb_jar)},
+    )
+    conn.close()
+    print("CONNECT_OK")
+except jaydebeapiarrow.InterfaceError as e:
+    if "--add-opens=java.base/java.nio" in str(e):
+        print("FAIL_FAST_OK")
+    else:
+        print(f"WRONG_INTERFACE_ERROR: {{e}}")
+except Exception as e:
+    print(f"OTHER_ERROR: {{type(e).__name__}}: {{e}}")
+'''
+        stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
+        # JDK 16+ denies by default -> fail fast with the flag named;
+        # JDK 8-15 permits by default -> connecting genuinely works.
+        self.assertIn(stdout, ['PROBE_CLOSED\nFAIL_FAST_OK',
+                               'PROBE_OPEN\nCONNECT_OK'],
+                      f'Missing --add-opens behavior wrong for this JVM.\n'
+                      f'stdout: {stdout}\nstderr: {stderr}')
+
+    def test_fail_fast_consistent_on_retry(self):
+        """The --add-opens fail-fast must fire on every connect() call, not
+        just the first.  A retry after catching the InterfaceError (e.g. in a
+        connection-retry loop) must raise the same guidance again instead of
+        silently succeeding and dying at first fetch with the confusing
+        ExceptionInInitializerError the fail-fast exists to prevent."""
+        hsqldb_jar = self._hsqldb_jar()
+        code = f'''
+import jpype
+import jaydebeapiarrow
+
+jpype.startJVM(
+    jpype.getDefaultJVMPath(),
+    ignoreUnrecognized=True,
+    convertStrings=True,
+)
+
+def try_connect():
+    try:
+        conn = jaydebeapiarrow.connect(
+            "org.hsqldb.jdbcDriver",
+            "jdbc:hsqldb:mem:.",
+            ["SA", ""],
+            jars={repr(hsqldb_jar)},
+        )
+        conn.close()
+        return "CONNECT_OK"
+    except jaydebeapiarrow.InterfaceError as e:
+        if "--add-opens=java.base/java.nio" in str(e):
+            return "FAIL_FAST_OK"
+        return f"WRONG_INTERFACE_ERROR: {{e}}"
+    except Exception as e:
+        return f"OTHER_ERROR: {{type(e).__name__}}: {{e}}"
+
+print(f"FIRST={{try_connect()}} SECOND={{try_connect()}}")
+'''
+        stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
+        # Both calls must agree: fail fast twice on a denying JVM (16+),
+        # genuinely connect twice on a permissive one (8-15).
+        self.assertIn(
+            stdout,
+            ['FIRST=FAIL_FAST_OK SECOND=FAIL_FAST_OK',
+             'FIRST=CONNECT_OK SECOND=CONNECT_OK'],
+            f'Fail-fast inconsistent between first connect and retry.\n'
+            f'stdout: {stdout}\nstderr: {stderr}')
+
+    def test_dynamic_driver_not_reloaded_on_reconnect(self):
+        """Reconnects with the same jars= must reuse the dynamically loaded
+        driver: one DriverShim registered with DriverManager and one
+        URLClassLoader per (jclassname, jars), not one per connect() (#134).
+
+        Without caching, every reconnect of a long-lived process leaks a
+        classloader (never GC-able while its shim is registered) and stacks
+        up shims.  The connections' Class identity is also checked: both must
+        come from the same loader, whichever shim DriverManager picks."""
+        hsqldb_jar = self._hsqldb_jar()
+        code = f'''
+import jpype
+import jaydebeapiarrow
+
+jpype.startJVM(
+    jpype.getDefaultJVMPath(),
+    "--add-opens=java.base/java.nio=ALL-UNNAMED",
+    "--add-opens=java.base/java.lang=ALL-UNNAMED",
+    ignoreUnrecognized=True,
+    convertStrings=True,
+)
+
+url = "jdbc:hsqldb:mem:."
+args = ["SA", ""]
+conn1 = jaydebeapiarrow.connect(
+    "org.hsqldb.jdbcDriver", url, args, jars={repr(hsqldb_jar)})
+class1 = conn1.jconn.getClass()
+conn1.close()
+
+conn2 = jaydebeapiarrow.connect(
+    "org.hsqldb.jdbcDriver", url, args, jars={repr(hsqldb_jar)})
+class2 = conn2.jconn.getClass()
+conn2.close()
+
+# Same Class object <=> both connections came from the same URLClassLoader
+same_class = bool(class1.equals(class2))
+
+# How many registered drivers claim this URL?  Exactly one shim should.
+drivers = jpype.java.sql.DriverManager.getDrivers()
+accepting = 0
+while drivers.hasMoreElements():
+    if drivers.nextElement().acceptsURL(url):
+        accepting += 1
+
+print(f"SAME_CLASS={{same_class}} SHIMS={{accepting}}")
+'''
+        stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
+        self.assertEqual(stdout, 'SAME_CLASS=True SHIMS=1',
+                         f'Dynamic driver reloading leaked on reconnect.\n'
+                         f'stdout: {stdout}\nstderr: {stderr}')
+
+    def test_class_not_found_without_jars_names_the_fix(self):
+        """On a pre-started JVM, a driver class that is nowhere to be found
+        must raise an error pointing at jars= / the classpath."""
+        code = '''
+import jpype
+import jaydebeapiarrow
+
+jpype.startJVM(
+    jpype.getDefaultJVMPath(),
+    "--add-opens=java.base/java.nio=ALL-UNNAMED",
+    "--add-opens=java.base/java.lang=ALL-UNNAMED",
+    ignoreUnrecognized=True,
+    convertStrings=True,
+)
+
+try:
+    jaydebeapiarrow.connect(
+        "org.example.NonexistentDriver",
+        "jdbc:nonexistent://dummy",
+    )
+    print("UNEXPECTED_SUCCESS")
+except TypeError as e:
+    if "jars" in str(e) and "classpath" in str(e):
+        print("GUIDANCE_OK")
+    else:
+        print(f"PLAIN_ERROR: {{e}}")
+except Exception as e:
+    print(f"OTHER_ERROR: {{type(e).__name__}}: {{e}}")
+'''
+        stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
+        self.assertEqual(stdout, 'GUIDANCE_OK',
+                         f'Class-not-found error should include jars guidance.\n'
+                         f'stdout: {stdout}\nstderr: {stderr}')
+
+
+# ---------------------------------------------------------------------------
+# Logging defaults (issue #140)
+# ---------------------------------------------------------------------------
+
+class LoggingDefaultsTest(unittest.TestCase):
+    """connect() must start the JVM quiet by default: SLF4J routed to JUL
+    via the bundled binding, packaged logging.properties at WARNING, and
+    user-supplied JUL configuration respected.
+
+    Each test runs in its own subprocess: the suite shares one JVM per
+    pytest process and only the first connect()'s jvm_args take effect.
+    """
+
+    def _run_in_subprocess(self, code, env=None):
+        result = subprocess.run(
+            [sys.executable, '-c', code],
+            capture_output=True, text=True, timeout=60,
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            env=env
+        )
+        return result.stdout.strip(), result.stderr.strip()
+
+    def _bare_env(self):
+        return {k: v for k, v in os.environ.items() if k != 'CLASSPATH'}
+
+    def _mock_jar(self):
+        for root, _dirs, files in os.walk(_THIS_DIR):
+            for f in files:
+                if f.startswith('mockdriver') and f.endswith('.jar'):
+                    return os.path.join(root, f)
+        self.skipTest('mockdriver JAR not found')
+
+    def test_default_connect_emits_no_arrow_logs(self):
+        """Issue #140: a plain connect() must not spill org.apache.arrow
+        INFO records onto stdout/stderr."""
+        jar = self._mock_jar()
+        code = f'''
+import jaydebeapiarrow
+conn = jaydebeapiarrow.connect(
+    "org.jaydebeapi.mockdriver.MockDriver",
+    "jdbc:jaydebeapi://dummyurl",
+    jars={repr(jar)},
+)
+conn.close()
+print("DONE")
+'''
+        stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
+        self.assertEqual(stdout, 'DONE',
+                         f'stdout polluted: {stdout!r}\nstderr: {stderr!r}')
+        self.assertNotIn('org.apache.arrow', stdout)
+        self.assertNotIn('org.apache.arrow', stderr)
+
+    def test_slf4j_binding_is_jul(self):
+        """The bundled binding must route SLF4J into java.util.logging."""
+        jar = self._mock_jar()
+        code = f'''
+import jpype, jaydebeapiarrow
+conn = jaydebeapiarrow.connect(
+    "org.jaydebeapi.mockdriver.MockDriver",
+    "jdbc:jaydebeapi://dummyurl",
+    jars={repr(jar)},
+)
+conn.close()
+factory = jpype.JClass("org.slf4j.LoggerFactory").getILoggerFactory()
+print("FACTORY=" + factory.getClass().getName())
+'''
+        stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
+        self.assertEqual(stdout, 'FACTORY=org.slf4j.jul.JDK14LoggerFactory',
+                         f'Wrong SLF4J binding.\nstdout: {stdout}\nstderr: {stderr}')
+
+    def test_user_jul_config_file_respected(self):
+        """Passing -Djava.util.logging.config.file via jvm_args must skip
+        the default injection and apply the user's file."""
+        jar = self._mock_jar()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            own = os.path.join(tmpdir, 'my-logging.properties')
+            with open(own, 'w') as f:
+                f.write('handlers=java.util.logging.ConsoleHandler\n'
+                        '.level=SEVERE\n')
+            code = f'''
+import jpype, jaydebeapiarrow
+conn = jaydebeapiarrow.connect(
+    "org.jaydebeapi.mockdriver.MockDriver",
+    "jdbc:jaydebeapi://dummyurl",
+    jars={repr(jar)},
+    jvm_args=["-Djava.util.logging.config.file=" + {repr(own)}],
+)
+conn.close()
+root = jpype.JClass("java.util.logging.Logger").getLogger("")
+print("LEVEL=" + str(root.getLevel()))
+'''
+            stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
+        self.assertEqual(stdout, 'LEVEL=SEVERE',
+                         f'User JUL config not honored.\nstdout: {stdout}\nstderr: {stderr}')
+
+    def test_classpath_order_is_deterministic(self):
+        """jars= entries must precede the packaged extension jar on the
+        classpath, with no duplicates (stable SLF4J provider order)."""
+        jar = self._mock_jar()
+        code = f'''
+import jpype, jaydebeapiarrow
+conn = jaydebeapiarrow.connect(
+    "org.jaydebeapi.mockdriver.MockDriver",
+    "jdbc:jaydebeapi://dummyurl",
+    jars={repr(jar)})
+conn.close()
+print("CP=" + jpype.java.lang.System.getProperty("java.class.path"))
+'''
+        stdout, _ = self._run_in_subprocess(code, env=self._bare_env())
+        cp = stdout.split('CP=', 1)[1].split(os.pathsep)
+        self.assertEqual(os.path.basename(cp[0]),
+                         os.path.basename(jar))          # jars= first
+        # The extension jar (and any CLASSPATH entries) must follow the
+        # user jars.  JPype appends its own org.jpype.jar at the end, so
+        # "extension last" is not the invariant — relative order is.
+        extension_idx = [i for i, p in enumerate(cp)
+                         if 'arrow-jdbc-extension' in os.path.basename(p)]
+        self.assertTrue(extension_idx,
+                        f'extension jar missing from classpath: {cp}')
+        self.assertLess(0, min(extension_idx))
+        self.assertEqual(len(cp), len(set(cp)))          # no duplicates
+
+
+class JulConfigInjectionTest(unittest.TestCase):
+    """Skip logic for the default -Djava.util.logging injection."""
+
+    def test_injected_when_no_user_config(self):
+        self.assertEqual(
+            jaydebeapiarrow._default_jul_config_arg(None),
+            ['-Djava.util.logging.config.file='
+             + jaydebeapiarrow._DEFAULT_LOGGING_PROPERTIES])
+
+    def test_injected_for_unrelated_args(self):
+        args = jaydebeapiarrow._default_jul_config_arg(['-Xmx1g'])
+        self.assertEqual(len(args), 1)
+        self.assertTrue(args[0].startswith('-Djava.util.logging.config.file='))
+
+    def test_skipped_for_user_config_file(self):
+        self.assertEqual(
+            jaydebeapiarrow._default_jul_config_arg(
+                ['-Djava.util.logging.config.file=/mine.properties']), [])
+
+    def test_skipped_for_user_config_class(self):
+        self.assertEqual(
+            jaydebeapiarrow._default_jul_config_arg(
+                ['-Djava.util.logging.config.class=com.acme.LogCfg']), [])
+
+
+# ---------------------------------------------------------------------------
 # JPype reflection / type mapping tests (legacy #111)
 # ---------------------------------------------------------------------------
 
-class _ReflectionTestBase(object):
+class _ReflectionTestBase:
     """Base class for java.sql.Types reflection and DBAPITypeObject tests."""
 
     DRIVER_CLASS = None
@@ -517,7 +917,7 @@ class _ReflectionTestBase(object):
         connection initializes the type mapping via Reflection."""
         import jpype
         Types = jpype.java.sql.Types
-        self.assertIsNotNone(jaydebeapiarrow._jdbc_const_to_name)
+        self.assertIsNotNone(jaydebeapiarrow._dbapi._jdbc_const_to_name)
         self.assertEqual(jaydebeapiarrow.NUMBER, Types.INTEGER)
         self.assertEqual(jaydebeapiarrow.STRING, Types.VARCHAR)
         self.assertEqual(jaydebeapiarrow.DATETIME, Types.TIMESTAMP)
@@ -526,7 +926,9 @@ class _ReflectionTestBase(object):
         """cursor.description should use correct type names from
         Reflection-based type mapping."""
         with self.conn.cursor() as cursor:
-            cursor.execute("CREATE TABLE test_reflect (id INTEGER, name VARCHAR(50), val DECIMAL(10,2))")
+            cursor.execute(
+                "CREATE TABLE test_reflect "
+                "(id INTEGER, name VARCHAR(50), val DECIMAL(10,2))")
             cursor.execute("INSERT INTO test_reflect VALUES (1, 'test', 3.14)")
             cursor.execute("SELECT * FROM test_reflect")
             desc = cursor.description
@@ -562,8 +964,8 @@ class _ReflectionTestBase(object):
         Types = jpype.java.sql.Types
         result = jaydebeapiarrow.DBAPITypeObject._map_jdbc_type_to_dbapi(Types.INTEGER)
         self.assertIs(result, jaydebeapiarrow.NUMBER)
-        self.assertIsNotNone(jaydebeapiarrow._jdbc_const_to_name)
-        self.assertGreater(len(jaydebeapiarrow._jdbc_const_to_name), 20)
+        self.assertIsNotNone(jaydebeapiarrow._dbapi._jdbc_const_to_name)
+        self.assertGreater(len(jaydebeapiarrow._dbapi._jdbc_const_to_name), 20)
 
     def test_dbapi_type_eq_with_jdbc_constants(self):
         """Verify DBAPITypeObject.__eq__ works with JDBC type constants

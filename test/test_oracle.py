@@ -1,15 +1,14 @@
-#-*- coding: utf-8 -*-
 
-import jaydebeapiarrow
 import os
 import unittest
-
 from decimal import Decimal
-from datetime import datetime
+
+import jaydebeapiarrow
+
 try:
-    from test._base import IntegrationTestBase, _THIS_DIR
+    from test._base import _THIS_DIR, IntegrationTestBase
 except ImportError:
-    from _base import IntegrationTestBase, _THIS_DIR
+    from _base import _THIS_DIR, IntegrationTestBase
 
 
 class OracleTest(IntegrationTestBase, unittest.TestCase):
@@ -33,7 +32,9 @@ class OracleTest(IntegrationTestBase, unittest.TestCase):
             db, conn = jaydebeapiarrow, self._quiet_connect(
                 driver, url, driver_args)
         except jpype.JException:
-            self.fail("Can not connect with Oracle. Please check if the instance is up and running.")
+            self.fail(
+                "Can not connect with Oracle. "
+                "Please check if the instance is up and running.")
         else:
             return db, conn
 
@@ -56,7 +57,7 @@ class OracleTest(IntegrationTestBase, unittest.TestCase):
         dbl_col = 3.5
         opened_at = self.dbapi.Date(1908, 2, 27)
         valid = 1
-        product_name = u'Savings account'
+        product_name = 'Savings account'
         parms = (account_id, account_no, balance, blocking, dbl_col,
                  opened_at, valid, product_name)
         with self.conn.cursor() as cursor:

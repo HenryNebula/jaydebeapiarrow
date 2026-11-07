@@ -1,14 +1,14 @@
-#-*- coding: utf-8 -*-
 
-import jaydebeapiarrow
 import os
 import unittest
-
 from decimal import Decimal
+
+import jaydebeapiarrow
+
 try:
-    from test._base import IntegrationTestBase, _THIS_DIR
+    from test._base import _THIS_DIR, IntegrationTestBase
 except ImportError:
-    from _base import IntegrationTestBase, _THIS_DIR
+    from _base import _THIS_DIR, IntegrationTestBase
 
 
 class DB2Test(IntegrationTestBase, unittest.TestCase):
@@ -52,7 +52,7 @@ class DB2Test(IntegrationTestBase, unittest.TestCase):
         dbl_col = 3.5
         opened_at = self.dbapi.Date(1908, 2, 27)
         valid = 1
-        product_name = u'Savings account'
+        product_name = 'Savings account'
         parms = (account_id, account_no, balance, blocking, dbl_col,
                  opened_at, valid, product_name)
         with self.conn.cursor() as cursor:

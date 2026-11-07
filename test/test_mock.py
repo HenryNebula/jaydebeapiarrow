@@ -1,4 +1,3 @@
-#-*- coding: utf-8 -*-
 
 # Copyright 2015 Bastian Bowe
 #
@@ -17,30 +16,20 @@
 # License along with JayDeBeApi.  If not, see
 # <http://www.gnu.org/licenses/>.
 
-import jaydebeapiarrow
+import threading
+import unittest
 from datetime import datetime
 from decimal import Decimal
-import os
-import sys
-import threading
 from functools import partial
 
-try:
-    from test._base import _SUPPRESS_LOGGING_ARGS
-except ImportError:
-    from _base import _SUPPRESS_LOGGING_ARGS
+import jaydebeapiarrow
 
-try:
-    import unittest2 as unittest
-except ImportError:
-    import unittest
 
 class MockTest(unittest.TestCase):
 
     def setUp(self):
         self.conn = jaydebeapiarrow.connect('org.jaydebeapi.mockdriver.MockDriver',
-                                       'jdbc:jaydebeapi://dummyurl',
-                                       jvm_args=_SUPPRESS_LOGGING_ARGS)
+                                       'jdbc:jaydebeapi://dummyurl')
 
     def tearDown(self):
         self.conn.close()
@@ -50,18 +39,6 @@ class MockTest(unittest.TestCase):
                                 'TIME_WITH_TIMEZONE', 'TIMESTAMP_WITH_TIMEZONE'}
 
     def test_all_db_api_type_objects_have_valid_mapping(self):
-        extra_type_mappings = {
-            'DATE': 'getDate',
-            'TIME': 'getTime',
-            'TIMESTAMP': 'getTimestamp',
-            'STRING': 'getString',
-            'TEXT': 'getString',
-            'BINARY': 'getBinary',
-            'NUMBER': 'getInt',
-            'FLOAT': 'getDouble',
-            'DECIMAL': 'getBigDecimal',
-            'ROWID': 'getRowID'
-        }
         for db_api_type in jaydebeapiarrow.__dict__.values():
             if isinstance(db_api_type, jaydebeapiarrow.DBAPITypeObject):
                 for jsql_type_name in db_api_type.values:
@@ -213,8 +190,8 @@ class MockTest(unittest.TestCase):
         """Declared 39-76 digit decimals flow as decimal256 through
         fetch_arrow_table (issue #125: pyarrow's JVM bridge mapped every
         Decimal to decimal128 and raised on precision > 38)."""
-        import pyarrow as pa
         import jpype
+        import pyarrow as pa
         BigDecimal = jpype.JClass("java.math.BigDecimal")
         value = BigDecimal("12345678901234567890.123456789012345678901234567890")
         self.conn.jconn.mockSingleRowDecimalResult(value, 50, 30)
@@ -228,8 +205,8 @@ class MockTest(unittest.TestCase):
 
     def test_fetch_arrow_batches_decimal256_native(self):
         """fetch_arrow_batches carries decimal256 natively too (issue #125)."""
-        import pyarrow as pa
         import jpype
+        import pyarrow as pa
         BigDecimal = jpype.JClass("java.math.BigDecimal")
         value = BigDecimal("12345678901234567890.123456789012345678901234567890")
         self.conn.jconn.mockSingleRowDecimalResult(value, 50, 30)
@@ -683,6 +660,24 @@ class MockTest(unittest.TestCase):
             except jaydebeapiarrow.InterfaceError as e:
                 self.assertIn("RuntimeException: expected", str(e))
 
+    def test_non_java_exception_reraised_verbatim_by_handler(self):
+        """A non-Java exception reaching the bare-except funnel (a Python
+        AttributeError/TypeError, or Ctrl-C as KeyboardInterrupt) must be
+        re-raised unchanged. It used to be masked by the message builder's
+        own AttributeError on getClass(), hiding the real failure."""
+        handler = jaydebeapiarrow._handle_sql_exception_jpype
+        with self.assertRaises(AttributeError) as ctx:
+            try:
+                raise AttributeError('original failure')
+            except BaseException:
+                handler()
+        self.assertEqual(str(ctx.exception), 'original failure')
+        with self.assertRaises(KeyboardInterrupt):
+            try:
+                raise KeyboardInterrupt()
+            except BaseException:
+                handler()
+
     def test_runtime_exception_on_execute_includes_cause_chain(self):
         """RuntimeException with a nested cause should include the cause message."""
         self.conn.jconn.mockExceptionOnExecuteWithCause(
@@ -751,8 +746,7 @@ class MockTest(unittest.TestCase):
 
     def test_connection_with_statement(self):
         with jaydebeapiarrow.connect('org.jaydebeapi.mockdriver.MockDriver',
-                                       'jdbc:jaydebeapi://dummyurl',
-                                       jvm_args=_SUPPRESS_LOGGING_ARGS) as conn:
+                                       'jdbc:jaydebeapi://dummyurl') as conn:
             self.assertEqual(conn._closed, False)
         self.assertEqual(conn._closed, True)
 
@@ -1018,6 +1012,12 @@ class MockTest(unittest.TestCase):
             cursor.execute("SELECT real_column AS alias_col FROM t")
             self.assertEqual(cursor.description[0][0], "alias_col")
 
+    def test_description_is_none_before_first_execute(self):
+        """PEP 249: cursor.description is None when the cursor has not yet
+        executed an operation — not an AttributeError (#132)."""
+        with self.conn.cursor() as cursor:
+            self.assertIsNone(cursor.description)
+
     def test_dbapi_type_other_maps_to_string(self):
         """JDBC OTHER should map to STRING type code."""
         import jpype
@@ -1249,8 +1249,7 @@ class MockTest(unittest.TestCase):
             warnings.simplefilter('always')
             self.conn = jaydebeapiarrow.connect(
                 'org.jaydebeapi.mockdriver.MockDriver',
-                'jdbc:jaydebeapi://dummyurl',
-                jvm_args=_SUPPRESS_LOGGING_ARGS)
+                'jdbc:jaydebeapi://dummyurl')
         jpype_warnings = [w for w in caught
                           if issubclass(w.category, DeprecationWarning)
                           and 'jpype' in str(w.message).lower()]
@@ -1440,7 +1439,8 @@ class MockTest(unittest.TestCase):
             self.assertIsNone(cursor.lastrowid)
 
     def test_lastrowid_none_after_insert(self):
-        """lastrowid is None after INSERT with no auto-generated keys (mock has no identity column)."""
+        """lastrowid is None after INSERT with no auto-generated keys
+        (mock has no identity column)."""
         self.conn.jconn.mockBigDecimalResult(1, 0)
         with self.conn.cursor() as cursor:
             cursor.execute("dummy stmt")
@@ -1482,6 +1482,23 @@ class MockTest(unittest.TestCase):
             with self.assertRaises(jaydebeapiarrow.DatabaseError):
                 cursor.fetchall()
 
+    def test_set_debug_toggles_jul_level(self):
+        """set_debug() must work once the JVM is running.
+
+        Regression: it referenced jpype without importing it (NameError),
+        and nothing else in the suite called it, so the breakage shipped.
+        """
+        import jpype
+        Logger = jpype.JClass("java.util.logging.Logger")
+        ext_logger = Logger.getLogger("org.jaydebeapiarrow.extension")
+        try:
+            jaydebeapiarrow.set_debug(True)
+            self.assertEqual(str(ext_logger.getLevel()), "FINE")
+            jaydebeapiarrow.set_debug(False)
+            self.assertEqual(str(ext_logger.getLevel()), "WARNING")
+        finally:
+            jaydebeapiarrow.set_debug(False)
+
 
 class DecimalWidthInferenceTest(unittest.TestCase):
     """_infer_decimal_widths must count the integer digits a positive
@@ -1514,7 +1531,7 @@ class ParallelConnectTest(unittest.TestCase):
             try:
                 conn = jaydebeapiarrow.connect(
                     'org.jaydebeapi.mockdriver.MockDriver',
-                    'jdbc:jaydebeapi://dummyurl%d' % idx)
+                    f'jdbc:jaydebeapi://dummyurl{idx}')
                 # Verify the connection is usable
                 self.assertIsNotNone(conn)
                 conn.close()

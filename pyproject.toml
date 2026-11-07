@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "JayDeBeApiArrow"
-version = "2.1.6"
+version = "2.2.0"
 description = "Use JDBC database drivers from Python 3 with a DB-API, accelerated with Apache Arrow."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -52,12 +52,23 @@ dev = [
     "psycopg2-binary>=2.9.12",
     "pytest>=8.4.2",
     "pytest-xdist>=3.8.0",
+    "ruff>=0.14",
     "SQLAlchemy>=2.0.0",
     "unittest-xml-reporting",
 ]
 
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+# E/W pycodestyle, F pyflakes (real errors), I import sorting, UP pyupgrade,
+# B bugbear.  Deliberately NOT enabled: BLE/S/TRY/PL -- the JNI bridge
+# legitimately uses broad excepts (Java exception translation) and asserts.
+select = ["E", "F", "W", "I", "UP", "B"]
+
 [tool.bumpversion]
-current_version = "2.1.6"
+current_version = "2.2.0"
 commit = true
 tag = true
 parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)(?:(?P<release>[a-zA-Z]+)(?P<build>\\d+))?"
@@ -76,3 +87,6 @@ values = ["dev", "rc", "final"]
 [tool.setuptools]
 packages = ["jaydebeapiarrow", "jaydebeapiarrow.lib"]
 include-package-data = true
+
+[tool.setuptools.package-data]
+jaydebeapiarrow = ["logging.properties"]

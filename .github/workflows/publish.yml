@@ -43,6 +43,10 @@ jobs:
       run: pip install build
     - name: Build wheel and tarball
       run: python3 -m build
+    - name: Verify packaged data files
+      run: |
+        WHEEL=$(ls dist/*.whl | tail -1)
+        python3 -c "import zipfile,sys; z=zipfile.ZipFile('$WHEEL'); sys.exit(0 if 'jaydebeapiarrow/logging.properties' in z.namelist() else 1)"
     - name: Verify package import from built wheel
       run: |
         WHEEL=$(ls dist/*.whl | tail -1)

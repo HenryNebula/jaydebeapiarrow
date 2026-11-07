@@ -1,13 +1,13 @@
-#-*- coding: utf-8 -*-
 
-import jaydebeapiarrow
 import os
 import unittest
 
+import jaydebeapiarrow
+
 try:
-    from test._base import IntegrationTestBase, _THIS_DIR
+    from test._base import _THIS_DIR, IntegrationTestBase
 except ImportError:
-    from _base import IntegrationTestBase, _THIS_DIR
+    from _base import _THIS_DIR, IntegrationTestBase
 
 
 class MSSQLTest(IntegrationTestBase, unittest.TestCase):
@@ -31,7 +31,9 @@ class MSSQLTest(IntegrationTestBase, unittest.TestCase):
             db, conn = jaydebeapiarrow, self._quiet_connect(
                 driver, url, driver_args)
         except jpype.JException:
-            self.fail("Can not connect with MS SQL Server. Please check if the instance is up and running.")
+            self.fail(
+                "Can not connect with MS SQL Server. "
+                "Please check if the instance is up and running.")
         else:
             return db, conn
 

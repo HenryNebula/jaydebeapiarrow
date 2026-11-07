@@ -139,10 +139,36 @@ with jaydebeapiarrow.connect(
 | `jclassname` | `str` | Fully-qualified Java driver class name |
 | `url` | `str` | JDBC connection URL |
 | `driver_args` | `list` or `dict` or `None` | `[user, password]` or connection properties dict |
-| `jars` | `str` or `list[str]` or `None` | Path(s) to JDBC driver JAR(s) |
+| `jars` | `str` or `list[str]` or `None` | Path(s) to JDBC driver JAR(s). Also works on an already-running JVM (see [Starting the JVM Yourself](#starting-the-jvm-yourself)) |
 | `libs` | `str` or `list[str]` or `None` | Path(s) to native libraries |
 | `jvm_args` | `list[str]` or `None` | Extra JVM arguments passed to `startJVM()`. Only takes effect on the first `connect()` call (when the JVM is started). Ignored on subsequent calls. |
 | `experimental` | `dict` or `None` | Experimental feature flags. See [Experimental Features](#experimental-features). |
+
+### Starting the JVM Yourself
+
+Usually you let `connect()` start the JVM (it builds the classpath from `jars`, adds the module opens Arrow needs, and honors `jvm_args` for anything else). If other code in your process starts the JVM first, `connect()` still works: `jars` are loaded dynamically via a `URLClassLoader`, and the packaged Arrow extension is loaded the same way when missing from the classpath.
+
+```python
+import jpype
+import jaydebeapiarrow
+
+jpype.startJVM(
+    jpype.getDefaultJVMPath(),
+    "--enable-native-access=ALL-UNNAMED",          # your own JVM flags
+    "--add-opens=java.base/java.nio=ALL-UNNAMED",  # required by Arrow (Java 9+)
+    "--add-opens=java.base/java.lang=ALL-UNNAMED",
+    ignoreUnrecognized=True,
+)
+
+# No classpath needed above — jars load dynamically:
+conn = jaydebeapiarrow.connect(
+    "org.h2.Driver", "jdbc:h2:mem:test", ["sa", ""],
+    jars="h2.jar",
+)
+```
+
+!!! warning "Module opens cannot be granted after JVM start"
+    Arrow's memory layer must reflect on `java.nio`, which requires `--add-opens=java.base/java.nio=ALL-UNNAMED` at JVM startup on JDK 16+ (older JDKs permit it by default). When the flag is missing, `connect()` fails fast with that guidance instead of an obscure `InaccessibleObjectException` at first fetch.
 
 ## Cursor Methods
 
@@ -257,12 +283,53 @@ This bypasses the fork-after-JVM-start guard and loads JDBC drivers dynamically 
 
 ### Dynamic Classpath Loading
 
-By default, JPype's classpath is immutable after the JVM starts - you can only load JDBC drivers that were available at JVM startup time.
-
-The `experimental={'dynamic_classpath': True}` flag works around this using the **DriverShim pattern**: new JARs are loaded via Java's `URLClassLoader`, and a shim proxy is registered with `DriverManager` to delegate to the dynamically loaded driver.
+Since dynamic loading became the default for already-running JVMs (see [Starting the JVM Yourself](#starting-the-jvm-yourself)), the `experimental={'dynamic_classpath': True}` flag now has one remaining purpose: it forces drivers through the **DriverShim pattern** (new JARs loaded via Java's `URLClassLoader`, a shim proxy registered with `DriverManager`) even when the driver class is already on the classpath, and it bypasses the fork-after-JVM-start guard — which is what makes it suitable for `gunicorn --preload` workers.
 
 !!! warning "Experimental"
     This feature is experimental and may change in future versions.
+
+## Logging
+
+When `connect()` starts the JVM, Java-side logging is configured for you:
+
+- SLF4J is routed into `java.util.logging` (JUL) — the bundled extension JAR
+  carries the `slf4j-jdk14` binding, so Arrow, netty and JDBC-driver logs all
+  flow through JUL.
+- The JVM receives `-Djava.util.logging.config.file=` pointing at a packaged
+  `logging.properties` with root level `WARNING` and a single-line console
+  format. INFO chatter (`org.apache.arrow.memory ...`) is off by default;
+  warnings and errors still print to stderr.
+
+Bring your own JUL config to change level or format — the default injection is
+skipped as soon as you pass `java.util.logging.config.file` (or `.class`)
+yourself:
+
+```python
+conn = jaydebeapiarrow.connect(
+    "org.postgresql.Driver",
+    "jdbc:postgresql://host:5432/db",
+    ["user", "password"],
+    jvm_args=["-Djava.util.logging.config.file=/path/to/logging.properties"],
+)
+```
+
+The packaged file (at `site-packages/jaydebeapiarrow/logging.properties`) is a
+good template. As with all `jvm_args`, it only takes effect on the `connect()`
+that starts the JVM.
+
+!!! note "Pre-started JVMs are untouched"
+    The default is injected only when `connect()` starts the JVM. If you call
+    `jpype.startJVM()` yourself, configure `java.util.logging` however you like.
+
+!!! warning "Bundled SLF4J binding"
+    The extension JAR contains an SLF4J-to-JUL binding. Adding another binding
+    (Logback, `log4j-slf4j2-impl`, ...) to the classpath makes SLF4J warn about
+    multiple providers and pick one, following classpath order (`jars=` first,
+    then `CLASSPATH`, then the bundled extension). Passing a binding via `jars=`
+    does **not** replace the bundled one — use the `CLASSPATH` environment
+    variable or your own `startJVM()` for that.
+
+For quick debug output from the JDBC bridge itself, see [Debugging](#debugging).
 
 ## Debugging
 
@@ -315,6 +382,11 @@ InterfaceError: Cannot use jaydebeapiarrow in a forked process.
 Use `gunicorn --preload` with lazy connections, or enable dynamic classpath - see [Fork Safety](#fork-safety).
 
 ### Non-ASCII characters garbled
+
+Some JDBC drivers (notably IBM Db2) convert strings through the JVM's default
+charset. When that default is not UTF-8 (e.g. `ANSI_X3.4-1968` on minimal
+server locales), non-ASCII characters — umlauts, CJK, emoji — raise
+`java.io.CharConversionException` during result-set traversal.
 
 Add JVM encoding argument or set environment variable:
 
