@@ -733,26 +733,28 @@ except Exception as e:
                          f'Class-not-found error should include jars guidance.\n'
                          f'stdout: {stdout}\nstderr: {stderr}')
 
-    def _sqlite_jar(self):
-        """sqlite-jdbc is the canonical slf4j-dependent driver."""
-        jar_dir = os.path.join(_THIS_DIR, 'jars')
-        if not os.path.isdir(jar_dir):
-            self.skipTest('test/jars/ directory not found (run download_jdbc_drivers.sh)')
-        for f in os.listdir(jar_dir):
-            if 'sqlite' in f.lower() and f.endswith('.jar'):
-                return os.path.join(jar_dir, f)
-        self.skipTest('sqlite-jdbc JAR not found in test/jars/')
+    def _mock_jar(self):
+        """The mock jar carries Slf4jDependentDriver: like sqlite-jdbc it
+        references slf4j without bundling it (provided-scope in the pom).
+        Built by test/build.sh, so it needs no driver downloads."""
+        for root, _dirs, files in os.walk(_THIS_DIR):
+            for f in files:
+                if f.startswith('mockdriver') and f.endswith('.jar'):
+                    return os.path.join(root, f)
+        self.fail('mockdriver JAR not found (run test/build.sh)')
 
     def test_slf4j_driver_on_external_jvm(self):
-        """An slf4j-dependent driver (sqlite-jdbc) must work on an externally
-        started JVM: the dynamic driver loader appends the packaged extension
-        jar so its shaded slf4j backs the driver when the user supplies none.
+        """An slf4j-dependent driver (Slf4jDependentDriver, which references
+        slf4j without bundling it -- like sqlite-jdbc) must work on an
+        externally started JVM: the dynamic driver loader appends the
+        packaged extension jar so its shaded slf4j backs the driver when
+        the user supplies none.
 
         Regression test for the UAT F1 finding -- without the fallback the
         driver dies at instantiation with
         ``NoClassDefFoundError: org/slf4j/LoggerFactory`` because the
         extension's shaded slf4j lives in a sibling classloader."""
-        sqlite_jar = self._sqlite_jar()
+        mock_jar = self._mock_jar()
         code = f'''
 import jpype
 import jaydebeapiarrow
@@ -766,18 +768,18 @@ jpype.startJVM(
 )
 
 conn = jaydebeapiarrow.connect(
-    "org.sqlite.JDBC", "jdbc:sqlite::memory:", jars={repr(sqlite_jar)})
+    "org.jaydebeapi.mockdriver.Slf4jDependentDriver",
+    "jdbc:jaydebeapi://dummyurl", jars={repr(mock_jar)})
+conn.jconn.mockStringResult("hello slf4j")
 cursor = conn.cursor()
-cursor.execute("CREATE TABLE t (id INTEGER, name TEXT)")
-cursor.execute("INSERT INTO t VALUES (1, 'hello'), (2, 'world')")
-cursor.execute("SELECT id, name FROM t ORDER BY id")
-rows = cursor.fetchall()
+cursor.execute("dummy stmt")
+row = cursor.fetchone()
 cursor.close()
 conn.close()
-print(f"SQLITE_OK: {{rows}}")
+print(f"MOCK_SLF4J_OK: {{row}}")
 '''
         stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
-        self.assertEqual(stdout, "SQLITE_OK: [(1, 'hello'), (2, 'world')]",
+        self.assertEqual(stdout, "MOCK_SLF4J_OK: ('hello slf4j',)",
                          f'slf4j-dependent driver failed on external JVM.\n'
                          f'stdout: {stdout}\nstderr: {stderr}')
 
@@ -785,7 +787,7 @@ print(f"SQLITE_OK: {{rows}}")
         """When the user supplies no slf4j, the driver loader must resolve
         org.slf4j.LoggerFactory from the packaged extension jar (the
         fallback), proving the two loaders are wired together."""
-        sqlite_jar = self._sqlite_jar()
+        mock_jar = self._mock_jar()
         code = f'''
 import jpype
 import jaydebeapiarrow
@@ -799,7 +801,8 @@ jpype.startJVM(
 )
 
 conn = jaydebeapiarrow.connect(
-    "org.sqlite.JDBC", "jdbc:sqlite::memory:", jars={repr(sqlite_jar)})
+    "org.jaydebeapi.mockdriver.Slf4jDependentDriver",
+    "jdbc:jaydebeapi://dummyurl", jars={repr(mock_jar)})
 conn.close()
 
 loader = next(iter(jaydebeapiarrow._dynamic_driver_loaders.values()))
@@ -817,7 +820,7 @@ print(f"LOCATION={{loc}}")
         """A user-supplied slf4j jar must win over the extension fallback:
         the extension jar is appended AFTER the user's jars, so their copy
         of any shared dependency takes precedence (documented policy)."""
-        sqlite_jar = self._sqlite_jar()
+        mock_jar = self._mock_jar()
         extension_jar = jaydebeapiarrow._get_arrow_jar_paths()[0]
         with tempfile.TemporaryDirectory() as tmpdir:
             user_slf4j = os.path.join(tmpdir, 'user-slf4j.jar')
@@ -840,11 +843,13 @@ jpype.startJVM(
 )
 
 conn = jaydebeapiarrow.connect(
-    "org.sqlite.JDBC", "jdbc:sqlite::memory:",
-    jars=[{repr(sqlite_jar)}, {repr(user_slf4j)}])
+    "org.jaydebeapi.mockdriver.Slf4jDependentDriver",
+    "jdbc:jaydebeapi://dummyurl",
+    jars=[{repr(mock_jar)}, {repr(user_slf4j)}])
+conn.jconn.mockStringResult("user wins")
 cursor = conn.cursor()
-cursor.execute("SELECT 1")
-cursor.fetchall()
+cursor.execute("dummy stmt")
+cursor.fetchone()
 conn.close()
 
 loader = next(iter(jaydebeapiarrow._dynamic_driver_loaders.values()))
