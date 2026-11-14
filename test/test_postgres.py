@@ -248,6 +248,28 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
             cursor.execute("SELECT pg_sleep(0)")
             self.assertIsInstance(cursor.fetchone()[0], str)
 
+    def test_bit_columns_read_as_strings(self):
+        """pgjdbc reports bit(n) as Types.BIT and cannot convert multi-bit
+        strings to boolean (issue #151). Metadata cannot distinguish bit(1)
+        from bit(n) (no precision reported), so every PG bit column returns
+        its string form; PG booleans ("bool") are unaffected."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT B'10101'")
+            self.assertEqual(cursor.fetchone()[0], '10101')
+            cursor.execute("SELECT B'1'")
+            self.assertEqual(cursor.fetchone()[0], '1')
+            cursor.execute("SELECT true")
+            self.assertIs(cursor.fetchone()[0], True)
+
+    def test_timetz_read_as_string_with_offset(self):
+        """PG timetz is reported as Types.TIME and the time path silently
+        mangles the offset (issue #152); the driver rendering preserves it."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT '10:30:00+02'::timetz")
+            self.assertEqual(cursor.fetchone()[0], '10:30:00+02')
+            cursor.execute("SELECT NULL::timetz")
+            self.assertIsNone(cursor.fetchone()[0])
+
     def test_array_column_read(self):
         """Verify ARRAY columns are readable as native Python lists via C Data Interface."""
         with self.conn.cursor() as cursor:
