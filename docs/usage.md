@@ -170,6 +170,9 @@ conn = jaydebeapiarrow.connect(
 !!! warning "Module opens cannot be granted after JVM start"
     Arrow's memory layer must reflect on `java.nio`, which requires `--add-opens=java.base/java.nio=ALL-UNNAMED` at JVM startup on JDK 16+ (older JDKs permit it by default). When the flag is missing, `connect()` fails fast with that guidance instead of an obscure `InaccessibleObjectException` at first fetch.
 
+!!! note "Drivers with external dependencies"
+    Drivers whose JARs reference libraries they don't bundle (e.g. sqlite-jdbc needs `slf4j`) work out of the box here: the packaged extension JAR's shaded `slf4j` backs them as a fallback. If you supply your own copy of such a library in `jars`, yours always wins — bring the API *and* a matching binding (a lone API jar gives you slf4j's default no-op logging with a "no providers found" notice).
+
 ## Cursor Methods
 
 ### Standard DB-API 2.0

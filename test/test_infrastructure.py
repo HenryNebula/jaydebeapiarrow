@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 
 import jaydebeapiarrow
 
@@ -731,6 +732,137 @@ except Exception as e:
         self.assertEqual(stdout, 'GUIDANCE_OK',
                          f'Class-not-found error should include jars guidance.\n'
                          f'stdout: {stdout}\nstderr: {stderr}')
+
+    def _mock_jar(self):
+        """The mock jar carries Slf4jDependentDriver: like sqlite-jdbc it
+        references slf4j without bundling it (provided-scope in the pom).
+        Built by test/build.sh, so it needs no driver downloads."""
+        for root, _dirs, files in os.walk(_THIS_DIR):
+            for f in files:
+                if f.startswith('mockdriver') and f.endswith('.jar'):
+                    return os.path.join(root, f)
+        self.fail('mockdriver JAR not found (run test/build.sh)')
+
+    def test_slf4j_driver_on_external_jvm(self):
+        """An slf4j-dependent driver (Slf4jDependentDriver, which references
+        slf4j without bundling it -- like sqlite-jdbc) must work on an
+        externally started JVM: the dynamic driver loader appends the
+        packaged extension jar so its shaded slf4j backs the driver when
+        the user supplies none.
+
+        Regression test for the UAT F1 finding -- without the fallback the
+        driver dies at instantiation with
+        ``NoClassDefFoundError: org/slf4j/LoggerFactory`` because the
+        extension's shaded slf4j lives in a sibling classloader."""
+        mock_jar = self._mock_jar()
+        code = f'''
+import jpype
+import jaydebeapiarrow
+
+jpype.startJVM(
+    jpype.getDefaultJVMPath(),
+    "--add-opens=java.base/java.nio=ALL-UNNAMED",
+    "--add-opens=java.base/java.lang=ALL-UNNAMED",
+    ignoreUnrecognized=True,
+    convertStrings=True,
+)
+
+conn = jaydebeapiarrow.connect(
+    "org.jaydebeapi.mockdriver.Slf4jDependentDriver",
+    "jdbc:jaydebeapi://dummyurl", jars={repr(mock_jar)})
+conn.jconn.mockStringResult("hello slf4j")
+cursor = conn.cursor()
+cursor.execute("dummy stmt")
+row = cursor.fetchone()
+cursor.close()
+conn.close()
+print(f"MOCK_SLF4J_OK: {{row}}")
+'''
+        stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
+        self.assertEqual(stdout, "MOCK_SLF4J_OK: ('hello slf4j',)",
+                         f'slf4j-dependent driver failed on external JVM.\n'
+                         f'stdout: {stdout}\nstderr: {stderr}')
+
+    def test_slf4j_fallback_comes_from_extension_jar(self):
+        """When the user supplies no slf4j, the driver loader must resolve
+        org.slf4j.LoggerFactory from the packaged extension jar (the
+        fallback), proving the two loaders are wired together."""
+        mock_jar = self._mock_jar()
+        code = f'''
+import jpype
+import jaydebeapiarrow
+
+jpype.startJVM(
+    jpype.getDefaultJVMPath(),
+    "--add-opens=java.base/java.nio=ALL-UNNAMED",
+    "--add-opens=java.base/java.lang=ALL-UNNAMED",
+    ignoreUnrecognized=True,
+    convertStrings=True,
+)
+
+conn = jaydebeapiarrow.connect(
+    "org.jaydebeapi.mockdriver.Slf4jDependentDriver",
+    "jdbc:jaydebeapi://dummyurl", jars={repr(mock_jar)})
+conn.close()
+
+loader = next(iter(jaydebeapiarrow._dynamic_driver_loaders.values()))
+cls = loader.loadClass("org.slf4j.LoggerFactory")
+loc = cls.getProtectionDomain().getCodeSource().getLocation().toString()
+print(f"LOCATION={{loc}}")
+'''
+        stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
+        self.assertTrue(stdout.startswith('LOCATION=') and
+                        'arrow-jdbc-extension' in stdout,
+                        f'slf4j fallback did not come from the extension jar.\n'
+                        f'stdout: {stdout}\nstderr: {stderr}')
+
+    def test_user_supplied_slf4j_wins_over_fallback(self):
+        """A user-supplied slf4j jar must win over the extension fallback:
+        the extension jar is appended AFTER the user's jars, so their copy
+        of any shared dependency takes precedence (documented policy)."""
+        mock_jar = self._mock_jar()
+        extension_jar = jaydebeapiarrow._get_arrow_jar_paths()[0]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            user_slf4j = os.path.join(tmpdir, 'user-slf4j.jar')
+            with zipfile.ZipFile(extension_jar) as src, \
+                    zipfile.ZipFile(user_slf4j, 'w') as dst:
+                for entry in src.namelist():
+                    if entry.startswith('org/slf4j/') or \
+                            entry.startswith('META-INF/services/'):
+                        dst.writestr(entry, src.read(entry))
+            code = f'''
+import jpype
+import jaydebeapiarrow
+
+jpype.startJVM(
+    jpype.getDefaultJVMPath(),
+    "--add-opens=java.base/java.nio=ALL-UNNAMED",
+    "--add-opens=java.base/java.lang=ALL-UNNAMED",
+    ignoreUnrecognized=True,
+    convertStrings=True,
+)
+
+conn = jaydebeapiarrow.connect(
+    "org.jaydebeapi.mockdriver.Slf4jDependentDriver",
+    "jdbc:jaydebeapi://dummyurl",
+    jars=[{repr(mock_jar)}, {repr(user_slf4j)}])
+conn.jconn.mockStringResult("user wins")
+cursor = conn.cursor()
+cursor.execute("dummy stmt")
+cursor.fetchone()
+conn.close()
+
+loader = next(iter(jaydebeapiarrow._dynamic_driver_loaders.values()))
+cls = loader.loadClass("org.slf4j.LoggerFactory")
+loc = cls.getProtectionDomain().getCodeSource().getLocation().toString()
+print(f"LOCATION={{loc}}")
+'''
+            stdout, stderr = self._run_in_subprocess(code, env=self._bare_env())
+            self.assertTrue(stdout.startswith('LOCATION=') and
+                            'user-slf4j.jar' in stdout,
+                            f'User-supplied slf4j jar did not win over the '
+                            f'extension fallback.\n'
+                            f'stdout: {stdout}\nstderr: {stderr}')
 
 
 # ---------------------------------------------------------------------------
