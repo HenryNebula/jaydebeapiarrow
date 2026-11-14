@@ -28,7 +28,7 @@ JayDeBeApiArrow converts JDBC data types through two stages: **JDBC to Arrow** (
 | `NVARCHAR` | `Utf8` | `str` | |
 | `LONGVARCHAR` / `LONGNVARCHAR` | `Utf8` | `str` | |
 | `CLOB` / `NCLOB` | `Utf8` | `str` | |
-| `OTHER` | `Utf8` | `str` | Fallback |
+| `OTHER` | `Utf8` | `str` | Fallback via `getString()` - all `OTHER` columns (e.g. PostgreSQL `inet`, `interval`, `uuid`, `json`/`jsonb`, ranges; HSQLDB `OBJECT`) |
 
 ### Temporal Types
 
@@ -55,8 +55,10 @@ JayDeBeApiArrow converts JDBC data types through two stages: **JDBC to Arrow** (
 |---|---|---|---|
 | `ARRAY` | `list` | `list` | Nested list per element type (e.g. `[1, 2, 3]` for `INT ARRAY`) |
 | `SQLXML` | `Utf8` | `str` | Fallback via `getString()` |
-| `ROWID` | `Utf8` | `str` | Fallback |
-| `JSON` / `JSONB` / `UUID` / `XML` | `Utf8` | `str` | Detected from type name when reported as `OTHER` |
+| `ROWID` | `Utf8` | `str` | Fallback via `getString()` |
+| `NCLOB` | `Utf8` | `str` | Fallback via `getString()` (`CLOB` is handled natively) |
+| `TIME_WITH_TIMEZONE` | `Utf8` | `str` | Fallback - not natively supported by Arrow |
+| `DATALINK` | `Utf8` | `str` | Fallback via `getString()` |
 
 ## How Type Detection Works
 
@@ -70,12 +72,16 @@ The `ExplicitTypeMapper` in `arrow-jdbc-extension.jar` inspects `ResultSetMetaDa
 
 ### Arrow-Unsupported Types
 
-These types are **not natively supported** by the Arrow JDBC adapter. They are converted to `VARCHAR` as a degraded fallback:
+These types are **not natively supported** by the Arrow JDBC adapter. They are mapped to `VARCHAR` and returned as strings via `getString()`:
 
+- **`OTHER`** - Returned as string, for **every** `OTHER` column regardless of type name: PostgreSQL `inet`, `cidr`, `macaddr`, `interval`, geometric types, `hstore`, `citext`, `tsvector`, `tsquery`, range types, `json`/`jsonb`, `uuid`, `xml`, `void`, and HSQLDB `OTHER`/`OBJECT` columns, among others. (Previously only type names containing `JSON`, `UUID`, or `XML` were auto-detected.)
 - **`SQLXML`** - Returned as string via `getString()`.
-- **`ROWID`** - Returned as string.
-- **`OTHER`** - Returned as string. Columns with type names containing `JSON`, `UUID`, or `XML` are auto-detected and mapped to `VARCHAR`.
+- **`ROWID`** - Returned as string (e.g., Oracle `ROWID` pseudo-columns).
+- **`NCLOB`** - Returned as string (`CLOB` is handled natively).
 - **`TIME_WITH_TIMEZONE`** - Not natively supported. Falls back to string representation.
+- **`DATALINK`** - Returned as string.
+
+Structured types — `STRUCT`, `JAVA_OBJECT`, `DISTINCT`, `REF`, `REF_CURSOR` — have no flat representation and still fail with an error; cast them to text in SQL if you need their contents ([#153](https://github.com/HenryNebula/jaydebeapiarrow/issues/153)).
 
 ### High-Precision Decimals
 

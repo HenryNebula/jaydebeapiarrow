@@ -35,7 +35,7 @@ This fork returns native Python types instead of strings for temporal and numeri
 
 - **Complete DBAPITypeObject coverage** - `OTHER` -> STRING, `NCLOB`/`SQLXML` -> TEXT, `ROWID`, `ARRAY` are now registered. The parent omits these, causing `cursor.description` to return `None` for their type codes.
 - **ARRAY type support** - columns reported as JDBC `ARRAY` are read as Python `list` objects. Parameter binding for lists converts them to Java arrays (`int[]`, `String[]`, etc.) and binds via `setObject()`.
-- **JSON/JSONB/UUID detection** - columns reported as JDBC `OTHER` with type names containing `JSON` or `UUID` (e.g., PostgreSQL) are explicitly mapped to `VARCHAR`.
+- **String fallback for flat JDBC types** - columns reported as JDBC `OTHER` (e.g., PostgreSQL `inet`/`interval`/`json`/`uuid`/ranges, HSQLDB `OBJECT`), as well as `ROWID`, `NCLOB`, `TIME_WITH_TIMEZONE`, and `DATALINK`, are mapped to `VARCHAR` and returned as strings.
 
 ### Parameter Binding Improvements
 

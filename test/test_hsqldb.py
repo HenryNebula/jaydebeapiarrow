@@ -50,6 +50,30 @@ class CursorDescriptionTest(unittest.TestCase):
             conn.close()
 
 
+class HsqldbOtherTypeTest(unittest.TestCase):
+    """HSQLDB reports OTHER/OBJECT columns as JDBC Types.OTHER (1111).
+    They must be mapped to VARCHAR instead of failing with
+    'Unmapped JDBC type: 1111'."""
+
+    def test_other_column_read_as_string(self):
+        conn = jaydebeapiarrow.connect('org.hsqldb.jdbcDriver',
+                                       'jdbc:hsqldb:mem:other_type_test',
+                                       ['SA', ''])
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("CREATE TABLE other_test (id INT, o OTHER)")
+                cursor.execute("INSERT INTO other_test VALUES (1, NULL)")
+                cursor.execute("SELECT o FROM other_test WHERE id = 1")
+                result = cursor.fetchone()
+                self.assertIsNone(result[0])
+                # OTHER → STRING fallback
+                self.assertIs(cursor.description[0][1], jaydebeapiarrow.STRING)
+        finally:
+            with conn.cursor() as cursor:
+                cursor.execute("DROP TABLE other_test")
+            conn.close()
+
+
 class HsqldbMultipleConnectionsTest(unittest.TestCase):
     """Test that multiple sequential and simultaneous connections work (issue #97)."""
 
