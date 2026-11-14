@@ -132,6 +132,45 @@ jobs:
         name: jvm-crash-logs-py${{ matrix.python-version }}
         path: hs_err_pid*.log
         if-no-files-found: ignore
+    - name: Capture service container logs
+      # Service containers (postgres/mysql) run on the runner's docker
+      # daemon; their logs are NOT part of the job log. When tests fail
+      # on connection errors, the DB-side log is the only way to tell
+      # "server misbehaved" (infra) from a code failure.
+      if: always()
+      run: |
+        mkdir -p svc-logs
+        docker ps -a > svc-logs/docker-ps.txt 2>&1 || true
+        for c in $(docker ps -a --format '{{.Names}}' 2>/dev/null); do
+          docker logs "$c" > "svc-logs/$c.log" 2>&1 || true
+        done
+    - name: Upload service logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: svc-logs-py${{ matrix.python-version }}
+        path: svc-logs/
+        if-no-files-found: ignore
+    - name: Flag infra-only failure
+      # All JUnit suites report zero failures/errors while the job is
+      # red: the signature of the SIGSEGV-at-exit flake (or any other
+      # runner/infra crash after tests passed). Surface it as a run
+      # annotation so triage does not need to open the raw log.
+      if: failure()
+      run: |
+        python - <<'PY'
+        import glob, re
+        files = glob.glob('build/test-reports/*.xml')
+        total = 0
+        for f in files:
+            text = open(f, errors='replace').read()
+            total += sum(int(g) for g in re.findall(
+                r'(?:failures|errors)="(\d+)"', text))
+        if files and total == 0:
+            print('::warning title=Infra-only failure::All test suites '
+                  'passed; this job failure is a runner/JVM-exit crash '
+                  '(infra), not a code failure.')
+        PY
 #    - name: Coveralls
 #      uses: baztian/coveralls-python-action@new-merged-changes
 #      with:
