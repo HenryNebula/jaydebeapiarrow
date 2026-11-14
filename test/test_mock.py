@@ -34,9 +34,12 @@ class MockTest(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
 
-    # JDBC types not supported by the Arrow data path (no Arrow type mapping)
-    _ARROW_UNSUPPORTED_TYPES = {'OTHER', 'NCLOB', 'SQLXML', 'ROWID', 'ARRAY',
-                                'TIME_WITH_TIMEZONE', 'TIMESTAMP_WITH_TIMEZONE'}
+    # JDBC types not consumed by the Arrow data path via the mock driver:
+    # ARRAY needs rs.getArray() which the mock does not stub (covered by the
+    # HSQLDB/PostgreSQL array tests instead). Flat types without a native
+    # Arrow representation are mapped to VARCHAR by the extension — see
+    # test_string_fallback_types_round_trip below.
+    _ARROW_UNSUPPORTED_TYPES = {'ARRAY'}
 
     def test_all_db_api_type_objects_have_valid_mapping(self):
         for db_api_type in jaydebeapiarrow.__dict__.values():
@@ -48,6 +51,21 @@ class MockTest(unittest.TestCase):
                     with self.conn.cursor() as cursor:
                         cursor.execute("dummy stmt")
                         cursor.fetchone()
+
+    # JDBC types with no native Arrow representation: the extension maps them
+    # to VARCHAR so they are read as strings via getString()
+    # (ExplicitTypeMapper string-fallback policy, UAT v2.2.0 finding F2).
+    _STRING_FALLBACK_TYPES = {'OTHER', 'ROWID', 'NCLOB', 'SQLXML',
+                              'TIME_WITH_TIMEZONE', 'DATALINK'}
+
+    def test_string_fallback_types_round_trip(self):
+        for type_name in self._STRING_FALLBACK_TYPES:
+            with self.subTest(type_name=type_name):
+                self.conn.jconn.mockType(type_name)
+                with self.conn.cursor() as cursor:
+                    cursor.execute("dummy stmt")
+                    result = cursor.fetchone()
+                self.assertIsInstance(result[0], str)
 
     def test_ancient_date_mapped(self):
         date = datetime(year=70, month=1, day=1).date()

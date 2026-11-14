@@ -215,6 +215,39 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
             finally:
                 cursor.execute("DROP TABLE test_xml_type")
 
+    def test_other_type_columns_read_as_strings(self):
+        """JDBC Types.OTHER columns with no native Arrow representation
+        (inet, interval, geometric, range, tsvector, ...) must be mapped to
+        VARCHAR and returned as strings, not fail with
+        'Unmapped JDBC type: 1111' (UAT v2.2.0 finding F2)."""
+        cases = [
+            ("SELECT '192.168.1.5'::inet", "192.168.1.5"),
+            ("SELECT interval '1 day 2:03:04'", "1 day 02:03:04"),
+            ("SELECT point(1.5, 2.5)", "(1.5,2.5)"),
+            ("SELECT '[1,10)'::int4range", "[1,10)"),
+            ("SELECT to_tsvector('english', 'hello big world')",
+             "'big':2 'hello':1 'world':3"),
+        ]
+        for sql, expected in cases:
+            with self.subTest(sql=sql):
+                with self.conn.cursor() as cursor:
+                    cursor.execute(sql)
+                    result = cursor.fetchone()
+                    self.assertIsInstance(result[0], str)
+                    self.assertEqual(result[0], expected)
+                    # Verify cursor.description reports STRING type code
+                    # (OTHER → STRING)
+                    self.assertIs(cursor.description[0][1],
+                                  jaydebeapiarrow.STRING)
+        # NULL in an OTHER column comes back as None
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT NULL::inet")
+            self.assertIsNone(cursor.fetchone()[0])
+        # void (e.g. pg_sleep) is reported as OTHER as well
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT pg_sleep(0)")
+            self.assertIsInstance(cursor.fetchone()[0], str)
+
     def test_array_column_read(self):
         """Verify ARRAY columns are readable as native Python lists via C Data Interface."""
         with self.conn.cursor() as cursor:

@@ -399,6 +399,10 @@ public abstract class MockConnection implements Connection {
         break;
       default:
         object = "DummyObject";
+        // Types without a native Arrow representation (OTHER, ROWID, NCLOB,
+        // TIME_WITH_TIMEZONE, DATALINK, ...) are mapped to VARCHAR by the
+        // extension and read via getString(), so stub it here too.
+        Mockito.when(mockResultSet.getString(1)).thenReturn((String) object);
         break;
     }
     Mockito.when(mockResultSet.getObject(1)).thenReturn(object);

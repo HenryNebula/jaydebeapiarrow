@@ -149,32 +149,41 @@ public class ExplicitTypeMapper {
             }
         }
 
-        /* Detect JSON/JSONB/UUID columns reported as Types.OTHER (e.g., PostgreSQL).
-         * Map to VARCHAR so they are read as strings via the default Arrow path. */
+        /* Map Types.OTHER columns to VARCHAR (e.g., PostgreSQL inet/interval/uuid/json,
+         * HSQLDB OTHER/OBJECT columns). Arrow's JDBC adapter has no native representation
+         * for OTHER, and getString() is the JDBC-sanctioned universal fallback, so every
+         * OTHER column is read as a string regardless of its type name. Structured types
+         * (STRUCT/REF/JAVA_OBJECT/DISTINCT/REF_CURSOR) are NOT covered and still fail —
+         * stringifying a composite silently would be worse than a clear error. */
         for (int columnIndex = 1; columnIndex <= resultSet.getMetaData().getColumnCount(); columnIndex++) {
             int columnType = resultSet.getMetaData().getColumnType(columnIndex);
             String columnTypeName = resultSet.getMetaData().getColumnTypeName(columnIndex);
             if (columnType == Types.OTHER) {
-                String upperTypeName = columnTypeName.toUpperCase();
-                if (upperTypeName.contains("JSON") || upperTypeName.contains("UUID")
-                        || upperTypeName.contains("XML")) {
-                    explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
-                    logger.fine(String.format(
-                            "Detected column %1s (%2s) as VARCHAR from type name '%3s' (JDBC type OTHER)",
-                            columnIndex, resultSet.getMetaData().getColumnName(columnIndex),
-                            columnTypeName));
-                }
+                explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
+                logger.fine(String.format(
+                        "Column %1s (%2s) has JDBC type OTHER ('%3s'), mapping to VARCHAR for string retrieval.",
+                        columnIndex, resultSet.getMetaData().getColumnName(columnIndex),
+                        columnTypeName));
             }
         }
 
-        /* Detect SQLXML columns - not natively supported by Arrow JDBC adapter.
-         * Map to VARCHAR so they are read as strings via getString(). */
-        List<Integer> xmlColumnIndices = parsedMetaData.getOrDefault(Types.SQLXML, new ArrayList<>());
-        for (int columnIndex : xmlColumnIndices) {
-            explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
-            logger.fine(String.format(
-                    "Column %1s (%2s) is SQLXML type, mapping to VARCHAR for string retrieval.",
-                    columnIndex, resultSet.getMetaData().getColumnName(columnIndex)));
+        /* Map flat types with no native Arrow representation to VARCHAR so they are
+         * read as strings via getString():
+         * - SQLXML (2009): document text
+         * - ROWID (-8): e.g., Oracle ROWID pseudo-columns
+         * - NCLOB (2011): national-character LOBs (CLOB is handled natively)
+         * - TIME_WITH_TIMEZONE (2013): no Arrow time-with-zone type
+         * - DATALINK (70): URL text */
+        int[] stringFallbackTypes = {
+                Types.SQLXML, Types.ROWID, Types.NCLOB, Types.TIME_WITH_TIMEZONE, Types.DATALINK};
+        for (int fallbackType : stringFallbackTypes) {
+            for (int columnIndex : parsedMetaData.getOrDefault(fallbackType, new ArrayList<>())) {
+                explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
+                logger.fine(String.format(
+                        "Column %1s (%2s) is %3s type, mapping to VARCHAR for string retrieval.",
+                        columnIndex, resultSet.getMetaData().getColumnName(columnIndex),
+                        JDBCType.valueOf(fallbackType).getName()));
+            }
         }
 
         /* ARRAY columns are now read natively via the C Data Interface.
