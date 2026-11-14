@@ -67,6 +67,26 @@ class MockTest(unittest.TestCase):
                     result = cursor.fetchone()
                 self.assertIsInstance(result[0], str)
 
+    def test_fallback_decimal_non_numeric_text_returns_string(self):
+        """NUMERIC string-fallback columns holding non-numeric text return
+        str instead of raising decimal.InvalidOperation (issue #150)."""
+        import jpype
+        Types = jpype.java.sql.Types
+
+        self.conn.jconn.mockMultiColumnResult(
+            [Types.NUMERIC], ['{"x": 1}'])
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], '{"x": 1}')
+
+        self.conn.jconn.mockMultiColumnResult(
+            [Types.NUMERIC], ['1.50'])
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal('1.50'))
+
     def test_vendor_specific_type_codes_map_to_string(self):
         """Vendor-specific JDBC codes (no JDBCType constant) map to VARCHAR
         via getString() unless the type name matches a better representation
