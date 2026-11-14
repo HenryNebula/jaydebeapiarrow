@@ -68,3 +68,16 @@ class MSSQLTest(IntegrationTestBase, unittest.TestCase):
     def test_blob_null_value(self):
         """MSSQL JDBC driver rejects NULL parameter binding for VARBINARY columns."""
         self.skipTest("MSSQL JDBC driver does not support NULL for VARBINARY parameter binding")
+
+    def test_vendor_specific_type_codes_read(self):
+        """DATETIMEOFFSET (-155) and SQL_VARIANT (-156) columns must not fail
+        type mapping (issue #149)."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT CAST('2024-01-15T10:30:00' AS DATETIMEOFFSET), "
+                "CAST(123 AS SQL_VARIANT)")
+            row = cursor.fetchone()
+        self.assertIsInstance(row[0], str)
+        self.assertIn('2024', row[0])
+        self.assertIsInstance(row[1], str)
+        self.assertEqual(row[1], '123')

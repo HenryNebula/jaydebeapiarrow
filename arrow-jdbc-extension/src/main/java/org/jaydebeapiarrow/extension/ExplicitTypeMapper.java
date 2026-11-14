@@ -2,6 +2,7 @@ package org.jaydebeapiarrow.extension;
 
 import java.sql.*;
 import java.util.*;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.jakewharton.fliptables.FlipTable;
@@ -37,9 +38,9 @@ public class ExplicitTypeMapper {
             int columnNullable = metaData.isNullable(columnIndex);
 
             String[] columnMetaData = {
-                    columnName,
-                    columnTypeName,
-                    inferredColumnTypeName,
+                    columnName == null ? "" : columnName,
+                    columnTypeName == null ? "" : columnTypeName,
+                    inferredColumnTypeName == null ? "" : inferredColumnTypeName,
                     ((Integer) columnNullable).toString(),
             };
             tabularMetaData.add(columnMetaData);
@@ -49,11 +50,13 @@ public class ExplicitTypeMapper {
             parsedMetaData.put(columnType, columnsWithSameType);
         }
 
-        String[][] columnMetaDataArray = new String[tabularMetaData.size()][];
-        logger.fine("\n" + FlipTable.of(
-                headers,
-                tabularMetaData.toArray(columnMetaDataArray)
-        ));
+        if (logger.isLoggable(Level.FINE)) {
+            String[][] columnMetaDataArray = new String[tabularMetaData.size()][];
+            logger.fine("\n" + FlipTable.of(
+                    headers,
+                    tabularMetaData.toArray(columnMetaDataArray)
+            ));
+        }
 
         return parsedMetaData;
     }
@@ -90,18 +93,22 @@ public class ExplicitTypeMapper {
         }
 
         /* Detect columns whose JDBC type code is not recognized by the standard
-         * JDBCType enum. Use column type NAME matching instead of hardcoded type
-         * codes so this works driver-agnostically.
-         * Known cases: Oracle reports BINARY_DOUBLE as type 101, and
-         * TIMESTAMP WITH TIME ZONE as type 101 (ojdbc8) or 2013 (ojdbc11). */
+         * JDBCType enum (vendor-specific codes, e.g. Oracle INTERVALYM = -103,
+         * INTERVALDS = -104, VECTOR = -105..-108, BFILE = -13, JSON = 2016,
+         * BINARY_FLOAT/BINARY_DOUBLE = 100/101; SQL Server DATETIMEOFFSET = -155,
+         * SQL_VARIANT = -156). Try the column type NAME first for types with a
+         * better representation than a string; anything else falls back to
+         * VARCHAR via getString(), mirroring the Types.OTHER policy — such
+         * columns would otherwise fail with "Unmapped JDBC type".
+         * Some drivers (e.g. ojdbc) may return a null type name, so guard. */
         for (int columnIndex = 1; columnIndex <= resultSet.getMetaData().getColumnCount(); columnIndex++) {
             int columnType = resultSet.getMetaData().getColumnType(columnIndex);
             String columnTypeName = resultSet.getMetaData().getColumnTypeName(columnIndex);
             try {
                 JDBCType.valueOf(columnType);
             } catch (IllegalArgumentException e) {
-                String upperTypeName = columnTypeName.toUpperCase();
-                if (upperTypeName.contains("BINARY_DOUBLE")) {
+                String upperTypeName = columnTypeName == null ? "" : columnTypeName.toUpperCase();
+                if (upperTypeName.contains("BINARY_DOUBLE") || upperTypeName.contains("BINARY_FLOAT")) {
                     explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.DOUBLE));
                     logger.fine(String.format(
                             "Detected column %1s (%2s) as DOUBLE from type name '%3s' (JDBC type %4$s)",
@@ -119,6 +126,13 @@ public class ExplicitTypeMapper {
                             "Detected column %1s (%2s) as TIMESTAMP from type name '%3s' (JDBC type %4$s)",
                             columnIndex, resultSet.getMetaData().getColumnName(columnIndex),
                             columnTypeName, columnType));
+                } else {
+                    explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
+                    logger.warning(String.format(
+                            "Column %1s (%2s) reports unrecognized JDBC type %3$s ('%4s'); "
+                            + "mapping to VARCHAR for string retrieval.",
+                            columnIndex, resultSet.getMetaData().getColumnName(columnIndex),
+                            columnType, columnTypeName));
                 }
             }
         }
