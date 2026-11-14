@@ -87,6 +87,27 @@ class MockTest(unittest.TestCase):
             result = cursor.fetchone()
         self.assertEqual(result[0], Decimal('1.50'))
 
+    def test_vendor_specific_type_codes_map_to_string(self):
+        """Vendor-specific JDBC codes (no JDBCType constant) map to VARCHAR
+        via getString() unless the type name matches a better representation
+        (issue #149)."""
+        cases = [
+            (-103, 'INTERVALYM', '+01-00', str),            # Oracle INTERVAL YEAR TO MONTH
+            (-104, 'INTERVALDS', '+000000001 01:00:00', str),  # Oracle INTERVAL DAY TO SECOND
+            (-155, 'datetimeoffset', '2024-01-15 10:30:00 +02:00', str),  # SQL Server
+            (-156, 'sql_variant', '123', str),              # SQL Server
+            (2016, 'JSON', '{"a":1}', str),                 # Oracle 23c native JSON
+            (-13, None, 'some/dir/file', str),              # Oracle BFILE (null type name)
+            (100, 'BINARY_FLOAT', '1.5', float),            # name-matched to DOUBLE
+        ]
+        for code, type_name, value, expected_type in cases:
+            with self.subTest(code=code):
+                self.conn.jconn.mockTypeWithCode(code, type_name, value)
+                with self.conn.cursor() as cursor:
+                    cursor.execute("dummy stmt")
+                    result = cursor.fetchone()
+                self.assertIsInstance(result[0], expected_type)
+
     def test_ancient_date_mapped(self):
         date = datetime(year=70, month=1, day=1).date()
         self.conn.jconn.mockDateResult(date.year, date.month, date.day)

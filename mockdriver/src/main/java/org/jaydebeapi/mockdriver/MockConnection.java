@@ -410,6 +410,30 @@ public abstract class MockConnection implements Connection {
     stubPrepareStatement(mockPreparedStatement);
   }
 
+  /** Mock a single-column result whose JDBC metadata reports an arbitrary
+   *  (possibly vendor-specific) type code and type name, with the value read
+   *  via getString(). For codes with no JDBCType enum constant (Oracle -103,
+   *  SQL Server -155, ...) which mockType() cannot represent. */
+  public final void mockTypeWithCode(int jdbcTypeCode, String typeName, String value)
+      throws SQLException {
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for code " + jdbcTypeCode + ")");
+    Mockito.when(mockPreparedStatement.getResultSet()).thenReturn(mockResultSet);
+    Mockito.when(mockResultSet.next()).thenReturn(true);
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    Mockito.when(mockMetaData.getColumnCount()).thenReturn(1);
+    Mockito.when(mockMetaData.getColumnType(1)).thenReturn(jdbcTypeCode);
+    Mockito.when(mockMetaData.getColumnTypeName(1)).thenReturn(typeName);
+    Mockito.when(mockMetaData.getColumnName(1)).thenReturn("DummyColumn");
+    Mockito.when(mockMetaData.getColumnLabel(1)).thenReturn("DummyColumn");
+    Mockito.when(mockMetaData.isNullable(1)).thenReturn(mockMetaData.columnNullable);
+    Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
+    Mockito.when(mockResultSet.getObject(1)).thenReturn(value);
+    Mockito.when(mockResultSet.getString(1)).thenReturn(value);
+    Mockito.when(mockResultSet.wasNull()).thenReturn(false);
+    stubPrepareStatement(mockPreparedStatement);
+  }
   private List<Object[]> capturedSetObjectArgs;
   private List<Object[]> capturedSetNullArgs;
 
