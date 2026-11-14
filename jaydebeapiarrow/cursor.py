@@ -365,7 +365,16 @@ class Cursor:
         # For large reads (fetchall), this is efficient.
         # Using arraysize or a default.
         batch_size = max(self.arraysize, 1024)
-        self._iter = convert_jdbc_rs_to_arrow_iterator(self._rs, batch_size=batch_size)
+        try:
+            self._iter = convert_jdbc_rs_to_arrow_iterator(
+                self._rs, batch_size=batch_size)
+        except Exception:
+            # Iterator creation inspects ResultSetMetaData and can reject
+            # unsupported types (e.g. STRUCT columns raise a descriptive
+            # SQLException from the extension, #153). Surface it as a DB-API
+            # error like every other JDBC failure instead of a raw Java
+            # exception.
+            _bridge._handle_sql_exception()
         return self._iter
 
     def _jdbc_decimal_info(self):

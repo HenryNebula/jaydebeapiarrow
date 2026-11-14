@@ -67,6 +67,24 @@ class MockTest(unittest.TestCase):
                     result = cursor.fetchone()
                 self.assertIsInstance(result[0], str)
 
+    # Structured JDBC types: no flat representation; must fail fast with the
+    # column and type named (#153), not with Arrow's generic errors.
+    _STRUCTURED_TYPES = ('STRUCT', 'JAVA_OBJECT', 'DISTINCT', 'REF', 'REF_CURSOR')
+
+    def test_structured_types_fail_with_named_column_error(self):
+        for type_name in self._STRUCTURED_TYPES:
+            with self.subTest(type_name=type_name):
+                self.conn.jconn.mockType(type_name)
+                with self.conn.cursor() as cursor:
+                    cursor.execute("dummy stmt")
+                    with self.assertRaises(
+                            jaydebeapiarrow.DatabaseError) as ctx:
+                        cursor.fetchone()
+                message = str(ctx.exception)
+                self.assertIn(type_name, message)
+                self.assertIn('DummyColumn', message)
+                self.assertIn('Cast the column to text', message)
+
     def test_ancient_date_mapped(self):
         date = datetime(year=70, month=1, day=1).date()
         self.conn.jconn.mockDateResult(date.year, date.month, date.day)
