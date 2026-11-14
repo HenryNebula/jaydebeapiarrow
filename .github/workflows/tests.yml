@@ -122,6 +122,16 @@ jobs:
         report_title: "JUnit Test Report (Python ${{ matrix.python-version }})"
         detailed_summary: true
         include_passed: true
+    - name: Upload JVM crash logs
+      # The JVM writes hs_err_pid*.log on SIGSEGV (the known flaky
+      # "exit code 245" = -11 at pytest exit). The runner discards them
+      # unless captured here, leaving no diagnostics for the crash.
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: jvm-crash-logs-py${{ matrix.python-version }}
+        path: hs_err_pid*.log
+        if-no-files-found: ignore
 #    - name: Coveralls
 #      uses: baztian/coveralls-python-action@new-merged-changes
 #      with:
@@ -488,6 +498,16 @@ jobs:
         report_title: "JUnit Test Report (Java 8)"
         detailed_summary: true
         include_passed: true
+    - name: Upload JVM crash logs
+      # The JVM writes hs_err_pid*.log on SIGSEGV (the known flaky
+      # "exit code 245" = -11 at pytest exit). The runner discards them
+      # unless captured here, leaving no diagnostics for the crash.
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: jvm-crash-logs-java8
+        path: hs_err_pid*.log
+        if-no-files-found: ignore
 
   test-jdk21:
     # JDK 16+ denies illegal reflective access by default (JEP 396), so the
