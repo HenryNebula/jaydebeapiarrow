@@ -127,6 +127,23 @@ class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
         """SQLite Xerial JDBC truncates microseconds via date_string_format."""
         self.skipTest("SQLite Xerial JDBC truncates microsecond precision")
 
+    def test_text_in_non_standard_declared_column(self):
+        """Columns declared with an unrecognized type name (e.g. JSON) are
+        reported as NUMERIC by sqlite-jdbc; text values must come back as
+        str instead of crashing the Decimal restore (issue #150)."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE weird_types (js JSON)")
+            try:
+                cursor.execute("INSERT INTO weird_types VALUES ('{\"x\": 1}')")
+                cursor.execute("SELECT js FROM weird_types")
+                self.assertEqual(cursor.fetchone()[0], '{"x": 1}')
+                # numeric text in the same column still restores to Decimal
+                cursor.execute("UPDATE weird_types SET js = '1.50'")
+                cursor.execute("SELECT js FROM weird_types")
+                self.assertEqual(cursor.fetchone()[0], Decimal('1.50'))
+            finally:
+                cursor.execute("DROP TABLE weird_types")
+
     def test_lastrowid_none_after_insert(self):
         """SQLite has implicit ROWID, so getGeneratedKeys returns the rowid."""
         stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE) " \

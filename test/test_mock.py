@@ -67,6 +67,26 @@ class MockTest(unittest.TestCase):
                     result = cursor.fetchone()
                 self.assertIsInstance(result[0], str)
 
+    def test_fallback_decimal_non_numeric_text_returns_string(self):
+        """NUMERIC string-fallback columns holding non-numeric text return
+        str instead of raising decimal.InvalidOperation (issue #150)."""
+        import jpype
+        Types = jpype.java.sql.Types
+
+        self.conn.jconn.mockMultiColumnResult(
+            [Types.NUMERIC], ['{"x": 1}'])
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], '{"x": 1}')
+
+        self.conn.jconn.mockMultiColumnResult(
+            [Types.NUMERIC], ['1.50'])
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            result = cursor.fetchone()
+        self.assertEqual(result[0], Decimal('1.50'))
+
     def test_ancient_date_mapped(self):
         date = datetime(year=70, month=1, day=1).date()
         self.conn.jconn.mockDateResult(date.year, date.month, date.day)

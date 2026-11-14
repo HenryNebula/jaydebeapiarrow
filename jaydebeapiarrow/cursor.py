@@ -28,6 +28,22 @@ def _decimal_field_metadata(jdbc_type_name, precision, scale):
     }
 
 
+def _to_decimal(value):
+    """Convert a string-fallback DECIMAL/NUMERIC cell to Decimal.
+
+    The string-transfer policy (#121) assumes such columns carry numeric
+    text, but drivers can report non-numeric text as NUMERIC — most notably
+    SQLite, where columns declared with an unrecognized type name (e.g.
+    ``JSON``) are NUMERIC to JDBC while holding arbitrary text (#150).
+    Return the raw string when it does not parse instead of raising
+    decimal.InvalidOperation mid-fetch.
+    """
+    try:
+        return Decimal(value)
+    except (ArithmeticError, ValueError, TypeError):
+        return value
+
+
 def _is_decimal_array_type_name(type_name):
     """True for JDBC ARRAY type names whose elements are DECIMAL/NUMERIC.
     Mirrors ExplicitTypeMapper.inferElementJdbcType's decimal branch, which
@@ -414,9 +430,9 @@ class Cursor:
             for i in cols:
                 v = row[i]
                 if isinstance(v, str):
-                    row[i] = Decimal(v)
+                    row[i] = _to_decimal(v)
                 elif isinstance(v, list):
-                    row[i] = [Decimal(e) if isinstance(e, str) else e
+                    row[i] = [_to_decimal(e) if isinstance(e, str) else e
                               for e in v]
             out.append(tuple(row))
         return out
@@ -669,12 +685,12 @@ class Cursor:
             # strings; rebuild each element.
             def to_decimal(v):
                 if isinstance(v, str):
-                    return Decimal(v)
+                    return _to_decimal(v)
                 if hasattr(v, "tolist"):
                     # to_pandas() materializes list cells as ndarrays
                     v = v.tolist()
                 if isinstance(v, list):
-                    return [Decimal(e) if isinstance(e, str) else e
+                    return [_to_decimal(e) if isinstance(e, str) else e
                             for e in v]
                 return v
 
