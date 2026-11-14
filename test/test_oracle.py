@@ -142,3 +142,21 @@ class OracleTest(IntegrationTestBase, unittest.TestCase):
 
     def test_varchar_columns_return_data(self):
         self.skipTest("Oracle requires TO_TIMESTAMP for date string literals")
+
+    def test_vendor_specific_type_codes_read(self):
+        """Oracle INTERVAL columns (vendor codes -103/-104) and BINARY_FLOAT
+        (100) must not fail type mapping (issue #149)."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT NUMTOYMINTERVAL(1, 'YEAR'), "
+                "NUMTODSINTERVAL(25, 'HOUR'), "
+                "CAST(1.5 AS BINARY_FLOAT) FROM DUAL")
+            row = cursor.fetchone()
+        # INTERVALYM/INTERVALDS have no better representation: string
+        # fallback (exact rendering is driver-normalized, e.g. '1 1:0:0.0')
+        self.assertIsInstance(row[0], str)
+        self.assertIn('1', row[0])
+        self.assertIsInstance(row[1], str)
+        # BINARY_FLOAT is name-matched to DOUBLE when ojdbc reports the name;
+        # if the name is missing, the blanket VARCHAR fallback applies
+        self.assertIsInstance(row[2], (float, str))

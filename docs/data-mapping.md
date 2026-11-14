@@ -65,7 +65,7 @@ JayDeBeApiArrow converts JDBC data types through two stages: **JDBC to Arrow** (
 The `ExplicitTypeMapper` in `arrow-jdbc-extension.jar` inspects `ResultSetMetaData` to build a per-column type mapping. It handles driver-specific quirks:
 
 1. **Standard types** - JDBC type codes like `Types.INTEGER`, `Types.VARCHAR` are mapped directly
-2. **Unknown type codes** - Some drivers use non-standard codes (e.g., Oracle `BINARY_DOUBLE` = 101). The mapper falls back to matching the column type *name* against known patterns
+2. **Unknown type codes** - Some drivers use non-standard codes (e.g., Oracle `BINARY_DOUBLE` = 101). The mapper falls back to matching the column type *name* against known patterns, and maps anything still unrecognized to `VARCHAR` (string via `getString()`)
 3. **Misreported types** - Some drivers misreport types (e.g., SQLite reports `TIME` as `VARCHAR`). The mapper detects these by comparing type code against type name
 
 ## Known Limitations
@@ -75,6 +75,7 @@ The `ExplicitTypeMapper` in `arrow-jdbc-extension.jar` inspects `ResultSetMetaDa
 These types are **not natively supported** by the Arrow JDBC adapter. They are mapped to `VARCHAR` and returned as strings via `getString()`:
 
 - **`OTHER`** - Returned as string, for **every** `OTHER` column regardless of type name: PostgreSQL `inet`, `cidr`, `macaddr`, `interval`, geometric types, `hstore`, `citext`, `tsvector`, `tsquery`, range types, `json`/`jsonb`, `uuid`, `xml`, `void`, and HSQLDB `OTHER`/`OBJECT` columns, among others. (Previously only type names containing `JSON`, `UUID`, or `XML` were auto-detected.)
+- **Vendor-specific type codes** - Codes without a `java.sql.Types` constant (Oracle `INTERVALYM`/-103, `INTERVALDS`/-104, `VECTOR`/-105..-108, `BFILE`/-13, `JSON`/2016; SQL Server `DATETIMEOFFSET`/-155, `SQL_VARIANT`/-156, `GUID`/-145) are returned as strings too, unless the type name identifies a better representation (`BINARY_DOUBLE`/`BINARY_FLOAT` → `DOUBLE`, `*TIMESTAMP*` names → `TIMESTAMP`/`TIMESTAMP_WITH_TIMEZONE`).
 - **`SQLXML`** - Returned as string via `getString()`.
 - **`ROWID`** - Returned as string (e.g., Oracle `ROWID` pseudo-columns).
 - **`NCLOB`** - Returned as string (`CLOB` is handled natively).
