@@ -58,6 +58,20 @@ public class ExplicitTypeMapper {
         return parsedMetaData;
     }
 
+    /** True when the ResultSet belongs to a PostgreSQL connection, used to
+     *  gate driver-specific type-name rules (SQL Server reports its BIT
+     *  columns with the same lowercase "bit" name). Failures - including
+     *  mocked ResultSets without a Statement - count as "not PostgreSQL". */
+    private static boolean isPostgreSQL(ResultSet resultSet) {
+        try {
+            String product = resultSet.getStatement().getConnection()
+                    .getMetaData().getDatabaseProductName();
+            return product != null && product.toUpperCase().contains("POSTGRESQL");
+        } catch (SQLException | RuntimeException e) {
+            return false;
+        }
+    }
+
     private JdbcFieldInfo createDefaultDecimalFieldInfo(int precision, int scale) {
         if (precision < 1) {
             // No declared precision (unbounded numeric): transfer as strings.
@@ -191,12 +205,15 @@ public class ExplicitTypeMapper {
          * multi-bit strings to boolean ("Cannot cast to boolean"). JDBC
          * metadata cannot distinguish bit(1) from bit(n) (pgjdbc reports no
          * precision), so every PG "bit" column is read as its string form
-         * ("10101"). MySQL reports its BIT columns as "BIT" (uppercase) and
-         * keeps the boolean path. */
+         * ("10101"). Gated on the database product name: SQL Server also
+         * reports its BIT columns as lowercase "bit" (real booleans), and
+         * MySQL reports "BIT" (uppercase, already excluded by the
+         * case-sensitive equals) - both keep the boolean path. */
+        boolean isPostgres = isPostgreSQL(resultSet);
         for (int columnIndex = 1; columnIndex <= resultSet.getMetaData().getColumnCount(); columnIndex++) {
             int columnType = resultSet.getMetaData().getColumnType(columnIndex);
             String columnTypeName = resultSet.getMetaData().getColumnTypeName(columnIndex);
-            if (columnType == Types.BIT && "bit".equals(columnTypeName)) {
+            if (isPostgres && columnType == Types.BIT && "bit".equals(columnTypeName)) {
                 explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
                 logger.fine(String.format(
                         "Detected column %1s (%2s) as a PostgreSQL bit string, mapping to VARCHAR.",
@@ -210,7 +227,7 @@ public class ExplicitTypeMapper {
         for (int columnIndex = 1; columnIndex <= resultSet.getMetaData().getColumnCount(); columnIndex++) {
             int columnType = resultSet.getMetaData().getColumnType(columnIndex);
             String columnTypeName = resultSet.getMetaData().getColumnTypeName(columnIndex);
-            if (columnType == Types.TIME && "timetz".equalsIgnoreCase(columnTypeName)) {
+            if (isPostgres && columnType == Types.TIME && "timetz".equalsIgnoreCase(columnTypeName)) {
                 explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
                 logger.fine(String.format(
                         "Detected column %1s (%2s) as TIMETZ, mapping to VARCHAR to preserve the offset.",
