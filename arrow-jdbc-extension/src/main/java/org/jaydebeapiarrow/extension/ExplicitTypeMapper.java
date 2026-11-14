@@ -186,6 +186,38 @@ public class ExplicitTypeMapper {
             }
         }
 
+        /* PostgreSQL bit(n) columns are reported as Types.BIT with type name
+         * "bit", exactly like boolean ("bool"), and pgjdbc cannot convert
+         * multi-bit strings to boolean ("Cannot cast to boolean"). JDBC
+         * metadata cannot distinguish bit(1) from bit(n) (pgjdbc reports no
+         * precision), so every PG "bit" column is read as its string form
+         * ("10101"). MySQL reports its BIT columns as "BIT" (uppercase) and
+         * keeps the boolean path. */
+        for (int columnIndex = 1; columnIndex <= resultSet.getMetaData().getColumnCount(); columnIndex++) {
+            int columnType = resultSet.getMetaData().getColumnType(columnIndex);
+            String columnTypeName = resultSet.getMetaData().getColumnTypeName(columnIndex);
+            if (columnType == Types.BIT && "bit".equals(columnTypeName)) {
+                explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
+                logger.fine(String.format(
+                        "Detected column %1s (%2s) as a PostgreSQL bit string, mapping to VARCHAR.",
+                        columnIndex, resultSet.getMetaData().getColumnName(columnIndex)));
+            }
+        }
+
+        /* PostgreSQL timetz (TIME WITH TIME ZONE) is reported as Types.TIME,
+         * and the time path silently mangles the offset. Read the driver's
+         * rendering instead, which preserves it ("10:30:00+02"). */
+        for (int columnIndex = 1; columnIndex <= resultSet.getMetaData().getColumnCount(); columnIndex++) {
+            int columnType = resultSet.getMetaData().getColumnType(columnIndex);
+            String columnTypeName = resultSet.getMetaData().getColumnTypeName(columnIndex);
+            if (columnType == Types.TIME && "timetz".equalsIgnoreCase(columnTypeName)) {
+                explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
+                logger.fine(String.format(
+                        "Detected column %1s (%2s) as TIMETZ, mapping to VARCHAR to preserve the offset.",
+                        columnIndex, resultSet.getMetaData().getColumnName(columnIndex)));
+            }
+        }
+
         /* ARRAY columns are now read natively via the C Data Interface.
          * Element type mapping is handled by createArraySubTypeMapping(). */
 

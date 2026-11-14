@@ -111,6 +111,8 @@ String-fallback columns carry `jdbc_type` / `jdbc_precision` / `jdbc_scale` fiel
 #### PostgreSQL
 
 - **TIMESTAMPTZ**: Reported as `Types.TIMESTAMP` by the PostgreSQL JDBC driver. Auto-detected by checking if the type name is `"timestamptz"` and overriding to `TIMESTAMP_WITH_TIMEZONE`.
+- **bit(n)**: Reported as `Types.BIT` with type name `"bit"` — identical metadata to `boolean` (`"bool"`) — and pgjdbc cannot convert multi-bit strings to boolean. JDBC metadata cannot distinguish `bit(1)` from `bit(n)`, so every `bit` column is returned as its string form (`'10101'`); `boolean` columns are unaffected.
+- **timetz (TIME WITH TIME ZONE)**: Reported as `Types.TIME`, and the time conversion silently mangles the offset. Returned as the driver rendering with the offset preserved (`'10:30:00+02'`).
 
 ### Parameter Binding
 
