@@ -19,6 +19,14 @@
       <version>3.3.3</version>
       <!-- non-test scope on purpose -->
    </dependency>
+   <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <version>2.0.9</version>
+      <!-- provided on purpose: the jar must NOT bundle slf4j so tests can
+           exercise the extension-jar fallback for dependency-less jars -->
+      <scope>provided</scope>
+   </dependency>
     <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>

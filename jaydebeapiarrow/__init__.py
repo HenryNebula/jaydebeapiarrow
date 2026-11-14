@@ -266,6 +266,16 @@ def _dynamic_load_driver(jclassname, jars):
             # Build URLClassLoader with the new JARs, parented to system
             # classloader
             urls = [jpype.java.io.File(j).toURI().toURL() for j in jars]
+            # On an externally started JVM the extension jar was itself
+            # loaded through its own URLClassLoader, so its shaded
+            # dependencies -- notably slf4j, which many JDBC drivers
+            # reference -- are invisible to this loader.  Append the
+            # extension jar AFTER the user's jars: a user-supplied copy of
+            # any shared dependency always wins, ours is a fallback, never
+            # an override.
+            if _jdbc_utils_dynamic_loader is not None:
+                urls += [jpype.java.io.File(j).toURI().toURL()
+                         for j in _get_arrow_jar_paths()]
             url_cl = jpype.java.net.URLClassLoader(
                 urls, jpype.java.lang.ClassLoader.getSystemClassLoader()
             )
