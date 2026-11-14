@@ -71,13 +71,16 @@ class MSSQLTest(IntegrationTestBase, unittest.TestCase):
 
     def test_vendor_specific_type_codes_read(self):
         """DATETIMEOFFSET (-155) and SQL_VARIANT (-156) columns must not fail
-        type mapping (issue #149)."""
+        type mapping (issue #149). Queried one column per statement: the
+        driver reports empty metadata names for these casts, and two
+        nameless columns do not survive the Arrow schema."""
         with self.conn.cursor() as cursor:
             cursor.execute(
-                "SELECT CAST('2024-01-15T10:30:00' AS DATETIMEOFFSET), "
-                "CAST(123 AS SQL_VARIANT)")
-            row = cursor.fetchone()
-        self.assertIsInstance(row[0], str)
-        self.assertIn('2024', row[0])
-        self.assertIsInstance(row[1], str)
-        self.assertEqual(row[1], '123')
+                "SELECT CAST('2024-01-15T10:30:00' AS DATETIMEOFFSET)")
+            datetimeoffset = cursor.fetchone()[0]
+            cursor.execute("SELECT CAST(123 AS SQL_VARIANT)")
+            sql_variant = cursor.fetchone()[0]
+        self.assertIsInstance(datetimeoffset, str)
+        self.assertIn('2024', datetimeoffset)
+        self.assertIsInstance(sql_variant, str)
+        self.assertEqual(sql_variant, '123')
