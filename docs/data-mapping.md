@@ -82,7 +82,7 @@ These types are **not natively supported** by the Arrow JDBC adapter. They are m
 - **`TIME_WITH_TIMEZONE`** - Not natively supported. Falls back to string representation.
 - **`DATALINK`** - Returned as string.
 
-Structured types — `STRUCT`, `JAVA_OBJECT`, `DISTINCT`, `REF`, `REF_CURSOR` — have no flat representation and still fail with an error; cast them to text in SQL if you need their contents ([#153](https://github.com/HenryNebula/jaydebeapiarrow/issues/153)).
+Structured types — `STRUCT`, `JAVA_OBJECT`, `DISTINCT`, `REF`, `REF_CURSOR` — have no flat representation and fail fast at fetch time with a `DatabaseError` naming the column, JDBC type, and type name (e.g. PostgreSQL composite types and `refcursor`). Cast them to text in SQL if you need their contents ([#153](https://github.com/HenryNebula/jaydebeapiarrow/issues/153)).
 
 ### High-Precision Decimals
 

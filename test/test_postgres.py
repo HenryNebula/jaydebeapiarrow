@@ -270,6 +270,28 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
             cursor.execute("SELECT NULL::timetz")
             self.assertIsNone(cursor.fetchone()[0])
 
+    def test_structured_types_fail_with_named_column_error(self):
+        """Columns with no flat representation must fail with an error naming
+        the column and type, not Arrow's generic 'No consumer for Arrow
+        type: Struct' / 'Unmapped JDBC type' (issue #153)."""
+        cases = [("SELECT 'c'::refcursor", 'REF_CURSOR')]
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TYPE struct_test_type AS (r float8, i float8)")
+            try:
+                cases.append(
+                    ("SELECT (1.0,2.0)::struct_test_type", 'STRUCT'))
+                for sql, type_name in cases:
+                    with self.subTest(sql=sql):
+                        cursor.execute(sql)
+                        with self.assertRaises(
+                                jaydebeapiarrow.DatabaseError) as ctx:
+                            cursor.fetchone()
+                        message = str(ctx.exception)
+                        self.assertIn(type_name, message)
+                        self.assertIn('Cast the column to text', message)
+            finally:
+                cursor.execute("DROP TYPE struct_test_type")
+
     def test_array_column_read(self):
         """Verify ARRAY columns are readable as native Python lists via C Data Interface."""
         with self.conn.cursor() as cursor:

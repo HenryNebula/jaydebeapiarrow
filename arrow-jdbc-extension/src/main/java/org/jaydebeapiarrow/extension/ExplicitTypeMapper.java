@@ -195,6 +195,28 @@ public class ExplicitTypeMapper {
             }
         }
 
+        /* Structured types have no flat representation: stringifying a
+         * composite silently would be worse than an error. Fail fast, at
+         * iterator-creation time, with the column and type named, instead
+         * of Arrow's generic "Unmapped JDBC type" / "No consumer for Arrow
+         * type" from deep inside the adapter (#153). */
+        int[] structuredTypes = {
+                Types.STRUCT, Types.JAVA_OBJECT, Types.DISTINCT, Types.REF, Types.REF_CURSOR};
+        for (int structuredType : structuredTypes) {
+            for (int columnIndex : parsedMetaData.getOrDefault(structuredType, new ArrayList<>())) {
+                String columnName = resultSet.getMetaData().getColumnName(columnIndex);
+                String typeName = resultSet.getMetaData().getColumnTypeName(columnIndex);
+                String typeDetail = (typeName == null || typeName.isEmpty())
+                        ? "" : String.format(", type name '%s'", typeName);
+                throw new SQLException(String.format(
+                        "Column %d (%s) has JDBC type %s (%d%s), which has no flat "
+                        + "Arrow representation and is not auto-converted. "
+                        + "Cast the column to text in SQL to fetch it as a string.",
+                        columnIndex, columnName,
+                        JDBCType.valueOf(structuredType).getName(), structuredType, typeDetail));
+            }
+        }
+
         /* Map flat types with no native Arrow representation to VARCHAR so they are
          * read as strings via getString():
          * - SQLXML (2009): document text
