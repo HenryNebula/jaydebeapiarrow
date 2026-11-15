@@ -260,6 +260,19 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
             19, Decimal('12.90'), Decimal('1.00'))
         ])
 
+    def test_duplicate_column_names_are_preserved(self):
+        """Drill fixture lives in dfs.tmp.account; BALANCE carries scale 2."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT ACCOUNT_NO AS a, BALANCE AS a, "
+                           "ACCOUNT_NO AS b FROM dfs.tmp.account "
+                           "ORDER BY 1")
+            self.assertEqual(
+                [d[0].lower() for d in cursor.description], ['a', 'a', 'b'])
+            self.assertEqual(cursor.fetchall(), [
+                (18, Decimal('12.40'), 18),
+                (19, Decimal('12.90'), 19),
+            ])
+
     def test_execute_and_fetchone(self):
         with self.conn.cursor() as cursor:
             cursor.execute("select ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING "

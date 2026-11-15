@@ -675,7 +675,8 @@ class IntegrationTestBase:
         path (UAT duplicate-column finding)."""
         with self.conn.cursor() as cursor:
             cursor.execute("SELECT ACCOUNT_NO AS a, BALANCE AS a, "
-                           "ACCOUNT_NO AS b FROM ACCOUNT")
+                           "ACCOUNT_NO AS b FROM ACCOUNT "
+                           "ORDER BY ACCOUNT_NO")
             # HSQLDB uppercases unquoted aliases; compare case-insensitively.
             self.assertEqual(
                 [d[0].lower() for d in cursor.description], ['a', 'a', 'b'])
