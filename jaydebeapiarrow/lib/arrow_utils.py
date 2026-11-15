@@ -57,7 +57,12 @@ def fetch_next_batch(it):
         try:
             batch = _import_batch_via_cdata(root)
             schema = batch.schema
-            rows = [tuple(r.values()) for r in batch.to_pylist()]
+            # Materialize column-wise: RecordBatch.to_pylist() builds per-row
+            # dicts keyed by column name, which collapses result sets with
+            # duplicate column names (e.g. "SELECT a, a FROM t").
+            cols = [batch.column(i).to_pylist()
+                    for i in range(batch.num_columns)]
+            rows = list(zip(*cols)) if cols else [()] * batch.num_rows
             return rows, schema
         finally:
             root.clear()

@@ -670,6 +670,20 @@ class IntegrationTestBase:
             cursor.execute('SELECT ACCOUNT_NO AS "ACCT_NUM" FROM ACCOUNT')
             self.assertEqual(cursor.description[0][0], "ACCT_NUM")
 
+    def test_duplicate_column_names_are_preserved(self):
+        """Duplicate column names keep every column and value in the row
+        path (UAT duplicate-column finding)."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT ACCOUNT_NO AS a, BALANCE AS a, "
+                           "ACCOUNT_NO AS b FROM ACCOUNT")
+            # HSQLDB uppercases unquoted aliases; compare case-insensitively.
+            self.assertEqual(
+                [d[0].lower() for d in cursor.description], ['a', 'a', 'b'])
+            self.assertEqual(cursor.fetchall(), [
+                (18, Decimal('12.4'), 18),
+                (19, Decimal('12.9'), 19),
+            ])
+
     def test_execute_param_none(self):
         """Verify that Python None round-trips as SQL NULL via parameter binding."""
         stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE, BLOCKING) " \

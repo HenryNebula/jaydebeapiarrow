@@ -543,6 +543,14 @@ public abstract class MockConnection implements Connection {
    *  @param values    Java objects to return for each column (via getObject)
    */
   public final void mockMultiColumnResult(int[] sqlTypes, Object[] values) throws SQLException {
+    mockMultiColumnResultNamed(sqlTypes, values, null);
+  }
+
+  /** Same as {@link #mockMultiColumnResult}, but with explicit column names,
+   *  which may repeat to exercise duplicate-name result sets (e.g. "SELECT a, a").
+   *  @param names  column names/labels; null falls back to col_1, col_2, ...
+   */
+  public final void mockMultiColumnResultNamed(int[] sqlTypes, Object[] values, String[] names) throws SQLException {
     PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
     Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
     mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(multi-column)");
@@ -556,8 +564,9 @@ public abstract class MockConnection implements Connection {
       int col = i + 1; // JDBC is 1-based
       Mockito.when(mockMetaData.getColumnType(col)).thenReturn(sqlTypes[i]);
       Mockito.when(mockMetaData.getColumnTypeName(col)).thenReturn(JDBCType.valueOf(sqlTypes[i]).getName());
-      Mockito.when(mockMetaData.getColumnName(col)).thenReturn("col_" + col);
-      Mockito.when(mockMetaData.getColumnLabel(col)).thenReturn("col_" + col);
+      String name = (names == null) ? ("col_" + col) : names[i];
+      Mockito.when(mockMetaData.getColumnName(col)).thenReturn(name);
+      Mockito.when(mockMetaData.getColumnLabel(col)).thenReturn(name);
       Mockito.when(mockMetaData.isNullable(col)).thenReturn(mockMetaData.columnNullableUnknown);
       Mockito.when(mockMetaData.getPrecision(col)).thenReturn(0);
       Mockito.when(mockMetaData.getScale(col)).thenReturn(0);

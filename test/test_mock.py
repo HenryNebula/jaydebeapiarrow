@@ -87,6 +87,22 @@ class MockTest(unittest.TestCase):
             result = cursor.fetchone()
         self.assertEqual(result[0], Decimal('1.50'))
 
+    def test_duplicate_column_names_are_preserved(self):
+        """Result sets with duplicate column names keep every column and
+        value in the row path (UAT duplicate-column finding)."""
+        import jpype
+        Types = jpype.java.sql.Types
+
+        self.conn.jconn.mockMultiColumnResultNamed(
+            [Types.INTEGER, Types.INTEGER, Types.VARCHAR],
+            [1, 2, 'x'],
+            ['val', 'val', 'other'])
+        with self.conn.cursor() as cursor:
+            cursor.execute("dummy stmt")
+            self.assertEqual(cursor.fetchone(), (1, 2, 'x'))
+            self.assertEqual([d[0] for d in cursor.description],
+                             ['val', 'val', 'other'])
+
     def test_vendor_specific_type_codes_map_to_string(self):
         """Vendor-specific JDBC codes (no JDBCType constant) map to VARCHAR
         via getString() unless the type name matches a better representation
