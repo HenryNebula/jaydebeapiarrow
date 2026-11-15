@@ -261,16 +261,18 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
         ])
 
     def test_duplicate_column_names_are_preserved(self):
-        """Drill fixture lives in dfs.tmp.account; BALANCE carries scale 2."""
+        """Drill fixture lives in dfs.tmp.account and Calcite rejects
+        duplicate select-list aliases ("Column 'a' is ambiguous"), so
+        produce the duplicate names by projecting one column twice."""
         with self.conn.cursor() as cursor:
-            cursor.execute("SELECT ACCOUNT_NO AS a, BALANCE AS a, "
-                           "ACCOUNT_NO AS b FROM dfs.tmp.account "
-                           "ORDER BY 1")
+            cursor.execute("SELECT ACCOUNT_NO, ACCOUNT_NO, BALANCE "
+                           "FROM dfs.tmp.account ORDER BY 1")
             self.assertEqual(
-                [d[0].lower() for d in cursor.description], ['a', 'a', 'b'])
+                [d[0].lower() for d in cursor.description],
+                ['account_no', 'account_no', 'balance'])
             self.assertEqual(cursor.fetchall(), [
-                (18, Decimal('12.40'), 18),
-                (19, Decimal('12.90'), 19),
+                (18, 18, Decimal('12.40')),
+                (19, 19, Decimal('12.90')),
             ])
 
     def test_execute_and_fetchone(self):
