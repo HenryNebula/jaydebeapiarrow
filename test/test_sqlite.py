@@ -51,6 +51,9 @@ class SqlitePyTest(SqliteTestBase, unittest.TestCase):
     def test_description_returns_column_alias(self):
         self.skipTest("Python sqlite3 does not support AS aliases in cursor.description")
 
+    def test_duplicate_column_names_are_preserved(self):
+        self.skipTest("Python sqlite3 does not support AS aliases in cursor.description")
+
     def test_timestamp_utc_roundtrip_no_timezone_shift(self):
         self.skipTest("Python sqlite3 does not support parameterized TIMESTAMP INSERT")
 

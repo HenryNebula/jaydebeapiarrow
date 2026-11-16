@@ -28,6 +28,7 @@ This fork returns native Python types instead of strings for temporal and numeri
 - **`fetch_arrow_batches()`** - yields `pyarrow.RecordBatch` objects (zero-copy).
 - **`fetch_arrow_table()`** - returns a single `pyarrow.Table`.
 - **`fetch_df()`** - returns a `pandas.DataFrame` via the optimized Arrow path.
+- **Duplicate column names preserved** - result sets like `SELECT a.val, b.val ...` return every column in `fetchone()`/`fetchmany()`/`fetchall()` (rows are materialized positionally, not by name).
 - **`TIMESTAMP_WITH_TIMEZONE` support** - properly handled as timezone-aware `datetime` (the parent has no converter for this type).
 - **`set_debug()`** - enables JUL-level debug logging from the Java bridge; Java-side logging defaults to WARNING via the packaged `logging.properties` (see [Usage: Logging](usage.md#logging)).
 
