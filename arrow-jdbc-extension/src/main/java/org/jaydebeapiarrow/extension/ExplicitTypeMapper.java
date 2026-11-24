@@ -2,6 +2,7 @@ package org.jaydebeapiarrow.extension;
 
 import java.sql.*;
 import java.util.*;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.jakewharton.fliptables.FlipTable;
@@ -37,9 +38,9 @@ public class ExplicitTypeMapper {
             int columnNullable = metaData.isNullable(columnIndex);
 
             String[] columnMetaData = {
-                    columnName,
-                    columnTypeName,
-                    inferredColumnTypeName,
+                    columnName == null ? "" : columnName,
+                    columnTypeName == null ? "" : columnTypeName,
+                    inferredColumnTypeName == null ? "" : inferredColumnTypeName,
                     ((Integer) columnNullable).toString(),
             };
             tabularMetaData.add(columnMetaData);
@@ -49,13 +50,29 @@ public class ExplicitTypeMapper {
             parsedMetaData.put(columnType, columnsWithSameType);
         }
 
-        String[][] columnMetaDataArray = new String[tabularMetaData.size()][];
-        logger.fine("\n" + FlipTable.of(
-                headers,
-                tabularMetaData.toArray(columnMetaDataArray)
-        ));
+        if (logger.isLoggable(Level.FINE)) {
+            String[][] columnMetaDataArray = new String[tabularMetaData.size()][];
+            logger.fine("\n" + FlipTable.of(
+                    headers,
+                    tabularMetaData.toArray(columnMetaDataArray)
+            ));
+        }
 
         return parsedMetaData;
+    }
+
+    /** True when the ResultSet belongs to a PostgreSQL connection, used to
+     *  gate driver-specific type-name rules (SQL Server reports its BIT
+     *  columns with the same lowercase "bit" name). Failures - including
+     *  mocked ResultSets without a Statement - count as "not PostgreSQL". */
+    private static boolean isPostgreSQL(ResultSet resultSet) {
+        try {
+            String product = resultSet.getStatement().getConnection()
+                    .getMetaData().getDatabaseProductName();
+            return product != null && product.toUpperCase().contains("POSTGRESQL");
+        } catch (SQLException | RuntimeException e) {
+            return false;
+        }
     }
 
     private JdbcFieldInfo createDefaultDecimalFieldInfo(int precision, int scale) {
@@ -90,18 +107,22 @@ public class ExplicitTypeMapper {
         }
 
         /* Detect columns whose JDBC type code is not recognized by the standard
-         * JDBCType enum. Use column type NAME matching instead of hardcoded type
-         * codes so this works driver-agnostically.
-         * Known cases: Oracle reports BINARY_DOUBLE as type 101, and
-         * TIMESTAMP WITH TIME ZONE as type 101 (ojdbc8) or 2013 (ojdbc11). */
+         * JDBCType enum (vendor-specific codes, e.g. Oracle INTERVALYM = -103,
+         * INTERVALDS = -104, VECTOR = -105..-108, BFILE = -13, JSON = 2016,
+         * BINARY_FLOAT/BINARY_DOUBLE = 100/101; SQL Server DATETIMEOFFSET = -155,
+         * SQL_VARIANT = -156). Try the column type NAME first for types with a
+         * better representation than a string; anything else falls back to
+         * VARCHAR via getString(), mirroring the Types.OTHER policy — such
+         * columns would otherwise fail with "Unmapped JDBC type".
+         * Some drivers (e.g. ojdbc) may return a null type name, so guard. */
         for (int columnIndex = 1; columnIndex <= resultSet.getMetaData().getColumnCount(); columnIndex++) {
             int columnType = resultSet.getMetaData().getColumnType(columnIndex);
             String columnTypeName = resultSet.getMetaData().getColumnTypeName(columnIndex);
             try {
                 JDBCType.valueOf(columnType);
             } catch (IllegalArgumentException e) {
-                String upperTypeName = columnTypeName.toUpperCase();
-                if (upperTypeName.contains("BINARY_DOUBLE")) {
+                String upperTypeName = columnTypeName == null ? "" : columnTypeName.toUpperCase();
+                if (upperTypeName.contains("BINARY_DOUBLE") || upperTypeName.contains("BINARY_FLOAT")) {
                     explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.DOUBLE));
                     logger.fine(String.format(
                             "Detected column %1s (%2s) as DOUBLE from type name '%3s' (JDBC type %4$s)",
@@ -119,6 +140,13 @@ public class ExplicitTypeMapper {
                             "Detected column %1s (%2s) as TIMESTAMP from type name '%3s' (JDBC type %4$s)",
                             columnIndex, resultSet.getMetaData().getColumnName(columnIndex),
                             columnTypeName, columnType));
+                } else {
+                    explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
+                    logger.warning(String.format(
+                            "Column %1s (%2s) reports unrecognized JDBC type %3$s ('%4s'); "
+                            + "mapping to VARCHAR for string retrieval.",
+                            columnIndex, resultSet.getMetaData().getColumnName(columnIndex),
+                            columnType, columnTypeName));
                 }
             }
         }
@@ -149,32 +177,98 @@ public class ExplicitTypeMapper {
             }
         }
 
-        /* Detect JSON/JSONB/UUID columns reported as Types.OTHER (e.g., PostgreSQL).
-         * Map to VARCHAR so they are read as strings via the default Arrow path. */
+        /* Map Types.OTHER columns to VARCHAR (e.g., PostgreSQL inet/interval/uuid/json,
+         * HSQLDB OTHER/OBJECT columns). Arrow's JDBC adapter has no native representation
+         * for OTHER, and getString() is the JDBC-sanctioned universal fallback, so every
+         * OTHER column is read as a string regardless of its type name. Structured types
+         * (STRUCT/REF/JAVA_OBJECT/DISTINCT/REF_CURSOR) are NOT covered and still fail —
+         * stringifying a composite silently would be worse than a clear error. */
         for (int columnIndex = 1; columnIndex <= resultSet.getMetaData().getColumnCount(); columnIndex++) {
             int columnType = resultSet.getMetaData().getColumnType(columnIndex);
             String columnTypeName = resultSet.getMetaData().getColumnTypeName(columnIndex);
             if (columnType == Types.OTHER) {
-                String upperTypeName = columnTypeName.toUpperCase();
-                if (upperTypeName.contains("JSON") || upperTypeName.contains("UUID")
-                        || upperTypeName.contains("XML")) {
-                    explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
-                    logger.fine(String.format(
-                            "Detected column %1s (%2s) as VARCHAR from type name '%3s' (JDBC type OTHER)",
-                            columnIndex, resultSet.getMetaData().getColumnName(columnIndex),
-                            columnTypeName));
-                }
+                explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
+                logger.fine(String.format(
+                        "Column %1s (%2s) has JDBC type OTHER ('%3s'), mapping to VARCHAR for string retrieval.",
+                        columnIndex, resultSet.getMetaData().getColumnName(columnIndex),
+                        columnTypeName));
             }
         }
 
-        /* Detect SQLXML columns - not natively supported by Arrow JDBC adapter.
-         * Map to VARCHAR so they are read as strings via getString(). */
-        List<Integer> xmlColumnIndices = parsedMetaData.getOrDefault(Types.SQLXML, new ArrayList<>());
-        for (int columnIndex : xmlColumnIndices) {
-            explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
-            logger.fine(String.format(
-                    "Column %1s (%2s) is SQLXML type, mapping to VARCHAR for string retrieval.",
-                    columnIndex, resultSet.getMetaData().getColumnName(columnIndex)));
+        /* Structured types have no flat representation: stringifying a
+         * composite silently would be worse than an error. Fail fast, at
+         * iterator-creation time, with the column and type named, instead
+         * of Arrow's generic "Unmapped JDBC type" / "No consumer for Arrow
+         * type" from deep inside the adapter (#153). */
+        int[] structuredTypes = {
+                Types.STRUCT, Types.JAVA_OBJECT, Types.DISTINCT, Types.REF, Types.REF_CURSOR};
+        for (int structuredType : structuredTypes) {
+            for (int columnIndex : parsedMetaData.getOrDefault(structuredType, new ArrayList<>())) {
+                String columnName = resultSet.getMetaData().getColumnName(columnIndex);
+                String typeName = resultSet.getMetaData().getColumnTypeName(columnIndex);
+                String typeDetail = (typeName == null || typeName.isEmpty())
+                        ? "" : String.format(", type name '%s'", typeName);
+                throw new SQLException(String.format(
+                        "Column %d (%s) has JDBC type %s (%d%s), which has no flat "
+                        + "Arrow representation and is not auto-converted. "
+                        + "Cast the column to text in SQL to fetch it as a string.",
+                        columnIndex, columnName,
+                        JDBCType.valueOf(structuredType).getName(), structuredType, typeDetail));
+            }
+        }
+
+        /* Map flat types with no native Arrow representation to VARCHAR so they are
+         * read as strings via getString():
+         * - SQLXML (2009): document text
+         * - ROWID (-8): e.g., Oracle ROWID pseudo-columns
+         * - NCLOB (2011): national-character LOBs (CLOB is handled natively)
+         * - TIME_WITH_TIMEZONE (2013): no Arrow time-with-zone type
+         * - DATALINK (70): URL text */
+        int[] stringFallbackTypes = {
+                Types.SQLXML, Types.ROWID, Types.NCLOB, Types.TIME_WITH_TIMEZONE, Types.DATALINK};
+        for (int fallbackType : stringFallbackTypes) {
+            for (int columnIndex : parsedMetaData.getOrDefault(fallbackType, new ArrayList<>())) {
+                explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
+                logger.fine(String.format(
+                        "Column %1s (%2s) is %3s type, mapping to VARCHAR for string retrieval.",
+                        columnIndex, resultSet.getMetaData().getColumnName(columnIndex),
+                        JDBCType.valueOf(fallbackType).getName()));
+            }
+        }
+
+        /* PostgreSQL bit(n) columns are reported as Types.BIT with type name
+         * "bit", exactly like boolean ("bool"), and pgjdbc cannot convert
+         * multi-bit strings to boolean ("Cannot cast to boolean"). JDBC
+         * metadata cannot distinguish bit(1) from bit(n) (pgjdbc reports no
+         * precision), so every PG "bit" column is read as its string form
+         * ("10101"). Gated on the database product name: SQL Server also
+         * reports its BIT columns as lowercase "bit" (real booleans), and
+         * MySQL reports "BIT" (uppercase, already excluded by the
+         * case-sensitive equals) - both keep the boolean path. */
+        boolean isPostgres = isPostgreSQL(resultSet);
+        for (int columnIndex = 1; columnIndex <= resultSet.getMetaData().getColumnCount(); columnIndex++) {
+            int columnType = resultSet.getMetaData().getColumnType(columnIndex);
+            String columnTypeName = resultSet.getMetaData().getColumnTypeName(columnIndex);
+            if (isPostgres && columnType == Types.BIT && "bit".equals(columnTypeName)) {
+                explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
+                logger.fine(String.format(
+                        "Detected column %1s (%2s) as a PostgreSQL bit string, mapping to VARCHAR.",
+                        columnIndex, resultSet.getMetaData().getColumnName(columnIndex)));
+            }
+        }
+
+        /* PostgreSQL timetz (TIME WITH TIME ZONE) is reported as Types.TIME,
+         * and the time path silently mangles the offset. Read the driver's
+         * rendering instead, which preserves it ("10:30:00+02"). */
+        for (int columnIndex = 1; columnIndex <= resultSet.getMetaData().getColumnCount(); columnIndex++) {
+            int columnType = resultSet.getMetaData().getColumnType(columnIndex);
+            String columnTypeName = resultSet.getMetaData().getColumnTypeName(columnIndex);
+            if (isPostgres && columnType == Types.TIME && "timetz".equalsIgnoreCase(columnTypeName)) {
+                explicitMapping.put(columnIndex, new JdbcFieldInfo(Types.VARCHAR));
+                logger.fine(String.format(
+                        "Detected column %1s (%2s) as TIMETZ, mapping to VARCHAR to preserve the offset.",
+                        columnIndex, resultSet.getMetaData().getColumnName(columnIndex)));
+            }
         }
 
         /* ARRAY columns are now read natively via the C Data Interface.

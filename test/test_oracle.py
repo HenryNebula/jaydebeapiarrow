@@ -1,15 +1,14 @@
-#-*- coding: utf-8 -*-
 
-import jaydebeapiarrow
 import os
 import unittest
-
 from decimal import Decimal
-from datetime import datetime
+
+import jaydebeapiarrow
+
 try:
-    from test._base import IntegrationTestBase, _THIS_DIR
+    from test._base import _THIS_DIR, IntegrationTestBase
 except ImportError:
-    from _base import IntegrationTestBase, _THIS_DIR
+    from _base import _THIS_DIR, IntegrationTestBase
 
 
 class OracleTest(IntegrationTestBase, unittest.TestCase):
@@ -33,7 +32,9 @@ class OracleTest(IntegrationTestBase, unittest.TestCase):
             db, conn = jaydebeapiarrow, self._quiet_connect(
                 driver, url, driver_args)
         except jpype.JException:
-            self.fail("Can not connect with Oracle. Please check if the instance is up and running.")
+            self.fail(
+                "Can not connect with Oracle. "
+                "Please check if the instance is up and running.")
         else:
             return db, conn
 
@@ -56,7 +57,7 @@ class OracleTest(IntegrationTestBase, unittest.TestCase):
         dbl_col = 3.5
         opened_at = self.dbapi.Date(1908, 2, 27)
         valid = 1
-        product_name = u'Savings account'
+        product_name = 'Savings account'
         parms = (account_id, account_no, balance, blocking, dbl_col,
                  opened_at, valid, product_name)
         with self.conn.cursor() as cursor:
@@ -141,3 +142,21 @@ class OracleTest(IntegrationTestBase, unittest.TestCase):
 
     def test_varchar_columns_return_data(self):
         self.skipTest("Oracle requires TO_TIMESTAMP for date string literals")
+
+    def test_vendor_specific_type_codes_read(self):
+        """Oracle INTERVAL columns (vendor codes -103/-104) and BINARY_FLOAT
+        (100) must not fail type mapping (issue #149)."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT NUMTOYMINTERVAL(1, 'YEAR'), "
+                "NUMTODSINTERVAL(25, 'HOUR'), "
+                "CAST(1.5 AS BINARY_FLOAT) FROM DUAL")
+            row = cursor.fetchone()
+        # INTERVALYM/INTERVALDS have no better representation: string
+        # fallback (exact rendering is driver-normalized, e.g. '1 1:0:0.0')
+        self.assertIsInstance(row[0], str)
+        self.assertIn('1', row[0])
+        self.assertIsInstance(row[1], str)
+        # BINARY_FLOAT is name-matched to DOUBLE when ojdbc reports the name;
+        # if the name is missing, the blanket VARCHAR fallback applies
+        self.assertIsInstance(row[2], (float, str))

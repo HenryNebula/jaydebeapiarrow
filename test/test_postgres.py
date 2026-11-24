@@ -1,15 +1,15 @@
-#-*- coding: utf-8 -*-
 
-import jaydebeapiarrow
 import os
 import unittest
-
-from decimal import Decimal
 from datetime import datetime, timezone
+from decimal import Decimal
+
+import jaydebeapiarrow
+
 try:
-    from test._base import IntegrationTestBase, _THIS_DIR
+    from test._base import _THIS_DIR, IntegrationTestBase
 except ImportError:
-    from _base import IntegrationTestBase, _THIS_DIR
+    from _base import _THIS_DIR, IntegrationTestBase
 
 
 class PostgresTest(IntegrationTestBase, unittest.TestCase):
@@ -34,7 +34,9 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
             db, conn = jaydebeapiarrow, self._quiet_connect(
                 driver, url, driver_args)
         except jpype.JException:
-            self.fail("Can not connect with PostgreSQL. Please check if the instance is up and running.")
+            self.fail(
+                "Can not connect with PostgreSQL. "
+                "Please check if the instance is up and running.")
         else:
             return db, conn
 
@@ -212,6 +214,83 @@ class PostgresTest(IntegrationTestBase, unittest.TestCase):
                 self.assertEqual(result[0], '<root><item>hello</item></root>')
             finally:
                 cursor.execute("DROP TABLE test_xml_type")
+
+    def test_other_type_columns_read_as_strings(self):
+        """JDBC Types.OTHER columns with no native Arrow representation
+        (inet, interval, geometric, range, tsvector, ...) must be mapped to
+        VARCHAR and returned as strings, not fail with
+        'Unmapped JDBC type: 1111' (UAT v2.2.0 finding F2)."""
+        cases = [
+            ("SELECT '192.168.1.5'::inet", "192.168.1.5"),
+            ("SELECT interval '1 day 2:03:04'", "1 day 02:03:04"),
+            ("SELECT point(1.5, 2.5)", "(1.5,2.5)"),
+            ("SELECT '[1,10)'::int4range", "[1,10)"),
+            ("SELECT to_tsvector('english', 'hello big world')",
+             "'big':2 'hello':1 'world':3"),
+        ]
+        for sql, expected in cases:
+            with self.subTest(sql=sql):
+                with self.conn.cursor() as cursor:
+                    cursor.execute(sql)
+                    result = cursor.fetchone()
+                    self.assertIsInstance(result[0], str)
+                    self.assertEqual(result[0], expected)
+                    # Verify cursor.description reports STRING type code
+                    # (OTHER → STRING)
+                    self.assertIs(cursor.description[0][1],
+                                  jaydebeapiarrow.STRING)
+        # NULL in an OTHER column comes back as None
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT NULL::inet")
+            self.assertIsNone(cursor.fetchone()[0])
+        # void (e.g. pg_sleep) is reported as OTHER as well
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT pg_sleep(0)")
+            self.assertIsInstance(cursor.fetchone()[0], str)
+
+    def test_bit_columns_read_as_strings(self):
+        """pgjdbc reports bit(n) as Types.BIT and cannot convert multi-bit
+        strings to boolean (issue #151). Metadata cannot distinguish bit(1)
+        from bit(n) (no precision reported), so every PG bit column returns
+        its string form; PG booleans ("bool") are unaffected."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT B'10101'")
+            self.assertEqual(cursor.fetchone()[0], '10101')
+            cursor.execute("SELECT B'1'")
+            self.assertEqual(cursor.fetchone()[0], '1')
+            cursor.execute("SELECT true")
+            self.assertIs(cursor.fetchone()[0], True)
+
+    def test_timetz_read_as_string_with_offset(self):
+        """PG timetz is reported as Types.TIME and the time path silently
+        mangles the offset (issue #152); the driver rendering preserves it."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("SELECT '10:30:00+02'::timetz")
+            self.assertEqual(cursor.fetchone()[0], '10:30:00+02')
+            cursor.execute("SELECT NULL::timetz")
+            self.assertIsNone(cursor.fetchone()[0])
+
+    def test_structured_types_fail_with_named_column_error(self):
+        """Columns with no flat representation must fail with an error naming
+        the column and type, not Arrow's generic 'No consumer for Arrow
+        type: Struct' / 'Unmapped JDBC type' (issue #153)."""
+        cases = [("SELECT 'c'::refcursor", 'REF_CURSOR')]
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TYPE struct_test_type AS (r float8, i float8)")
+            try:
+                cases.append(
+                    ("SELECT (1.0,2.0)::struct_test_type", 'STRUCT'))
+                for sql, type_name in cases:
+                    with self.subTest(sql=sql):
+                        cursor.execute(sql)
+                        with self.assertRaises(
+                                jaydebeapiarrow.DatabaseError) as ctx:
+                            cursor.fetchone()
+                        message = str(ctx.exception)
+                        self.assertIn(type_name, message)
+                        self.assertIn('Cast the column to text', message)
+            finally:
+                cursor.execute("DROP TYPE struct_test_type")
 
     def test_array_column_read(self):
         """Verify ARRAY columns are readable as native Python lists via C Data Interface."""

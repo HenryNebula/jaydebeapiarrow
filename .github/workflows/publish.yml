@@ -17,17 +17,13 @@ jobs:
         java-version: '11'
         distribution: 'temurin'
         cache: maven
-    - name: Cache built JARs
+    - name: Cache JDBC driver jars
       uses: actions/cache@v5
       with:
-        path: |
-          jaydebeapiarrow/lib/
-          test/jars/
-          arrow-jdbc-extension/target/
-          mockdriver/target/
-        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh') }}
+        path: test/jars/
+        key: ${{ runner.os }}-jdbc-drivers-${{ hashFiles('test/download_jdbc_drivers.sh') }}
         restore-keys: |
-          ${{ runner.os }}-jars-
+          ${{ runner.os }}-jdbc-drivers-
     - name: Build with Maven
       run: bash test/build.sh
     - name: Set up Python
@@ -43,6 +39,25 @@ jobs:
       run: pip install build
     - name: Build wheel and tarball
       run: python3 -m build
+    - name: Verify packaged data files
+      run: |
+        WHEEL=$(ls dist/*.whl | tail -1)
+        python3 - "$WHEEL" <<'EOF'
+        import glob
+        import sys
+        import zipfile
+
+        z = zipfile.ZipFile(sys.argv[1])
+        assert 'jaydebeapiarrow/logging.properties' in z.namelist()
+        # Packaged Python sources must be byte-identical to the checkout —
+        # guards against stale cache entries overwriting fresh sources.
+        for src in glob.glob('jaydebeapiarrow/lib/*.py'):
+            name = 'jaydebeapiarrow/lib/' + src.rsplit('/', 1)[-1]
+            assert name in z.namelist(), f'{name} missing from wheel'
+            assert z.read(name) == open(src, 'rb').read(), \
+                f'{name} in wheel differs from checked-out source'
+        print('wheel lib/ matches checkout')
+        EOF
     - name: Verify package import from built wheel
       run: |
         WHEEL=$(ls dist/*.whl | tail -1)
@@ -92,17 +107,13 @@ jobs:
         java-version: '11'
         distribution: 'temurin'
         cache: maven
-    - name: Cache built JARs
+    - name: Cache JDBC driver jars
       uses: actions/cache@v5
       with:
-        path: |
-          jaydebeapiarrow/lib/
-          test/jars/
-          arrow-jdbc-extension/target/
-          mockdriver/target/
-        key: ${{ runner.os }}-jars-${{ hashFiles('**/pom.xml', 'test/build.sh') }}
+        path: test/jars/
+        key: ${{ runner.os }}-jdbc-drivers-${{ hashFiles('test/download_jdbc_drivers.sh') }}
         restore-keys: |
-          ${{ runner.os }}-jars-
+          ${{ runner.os }}-jdbc-drivers-
     - name: Build with Maven
       run: bash test/build.sh
     - name: Install from TestPyPI

@@ -1,15 +1,14 @@
-#-*- coding: utf-8 -*-
+
+import unittest
+from datetime import datetime
+from decimal import Decimal
 
 import jaydebeapiarrow
-import os
-import unittest
 
-from decimal import Decimal
-from datetime import datetime
 try:
-    from test._base import IntegrationTestBase, SqliteTestBase, _THIS_DIR
+    from test._base import SqliteTestBase
 except ImportError:
-    from _base import IntegrationTestBase, SqliteTestBase, _THIS_DIR
+    from _base import SqliteTestBase
 
 
 class SqlitePyTest(SqliteTestBase, unittest.TestCase):
@@ -37,8 +36,11 @@ class SqlitePyTest(SqliteTestBase, unittest.TestCase):
     def connect(self):
         import sqlite3
         sqlite3.register_adapter(Decimal, lambda d: str(d))
-        sqlite3.register_converter("decimal", lambda s: Decimal(s.decode('utf-8')) if s is not None else s)
-        return sqlite3, self.ConnectionWithClosing(sqlite3.connect(':memory:', detect_types=sqlite3.PARSE_DECLTYPES))
+        sqlite3.register_converter(
+            "decimal",
+            lambda s: Decimal(s.decode('utf-8')) if s is not None else s)
+        conn = sqlite3.connect(':memory:', detect_types=sqlite3.PARSE_DECLTYPES)
+        return sqlite3, self.ConnectionWithClosing(conn)
 
     def test_execute_type_time(self):
         self.skipTest("Time type not supported by PySqlite")
@@ -47,6 +49,9 @@ class SqlitePyTest(SqliteTestBase, unittest.TestCase):
         self.skipTest("SQLite type affinity makes NUMERIC/DECIMAL precision unreliable")
 
     def test_description_returns_column_alias(self):
+        self.skipTest("Python sqlite3 does not support AS aliases in cursor.description")
+
+    def test_duplicate_column_names_are_preserved(self):
         self.skipTest("Python sqlite3 does not support AS aliases in cursor.description")
 
     def test_timestamp_utc_roundtrip_no_timezone_shift(self):
@@ -125,6 +130,23 @@ class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
         """SQLite Xerial JDBC truncates microseconds via date_string_format."""
         self.skipTest("SQLite Xerial JDBC truncates microsecond precision")
 
+    def test_text_in_non_standard_declared_column(self):
+        """Columns declared with an unrecognized type name (e.g. JSON) are
+        reported as NUMERIC by sqlite-jdbc; text values must come back as
+        str instead of crashing the Decimal restore (issue #150)."""
+        with self.conn.cursor() as cursor:
+            cursor.execute("CREATE TABLE weird_types (js JSON)")
+            try:
+                cursor.execute("INSERT INTO weird_types VALUES ('{\"x\": 1}')")
+                cursor.execute("SELECT js FROM weird_types")
+                self.assertEqual(cursor.fetchone()[0], '{"x": 1}')
+                # numeric text in the same column still restores to Decimal
+                cursor.execute("UPDATE weird_types SET js = '1.50'")
+                cursor.execute("SELECT js FROM weird_types")
+                self.assertEqual(cursor.fetchone()[0], Decimal('1.50'))
+            finally:
+                cursor.execute("DROP TABLE weird_types")
+
     def test_lastrowid_none_after_insert(self):
         """SQLite has implicit ROWID, so getGeneratedKeys returns the rowid."""
         stmt = "insert into ACCOUNT (ACCOUNT_ID, ACCOUNT_NO, BALANCE) " \
@@ -183,7 +205,8 @@ class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
     def test_execute_types(self):
         """
         xerial/sqlite-jdbc has some issues with type mapping:
-        1. Timestamp has inconsistent types: JDBC returns it as a VARCHAR, while it's defined as a TIMESTAMP in the DB
+        1. Timestamp has inconsistent types: JDBC returns it as a VARCHAR,
+           while it's defined as a TIMESTAMP in the DB
         2. Default date_string_format does not handle ISO Date (without microseconds)
         3. SQLite stores DECIMAL values with dynamic typing (integer vs double)
         """
@@ -197,7 +220,7 @@ class SqliteXerialTest(SqliteTestBase, unittest.TestCase):
         dbl_col = 3.5
         opened_at = self.dbapi.Timestamp(2008, 2, 27, 0, 0, 0)
         valid = True
-        product_name = u'Savings account'
+        product_name = 'Savings account'
         parms = (
             account_id,
             account_no, balance, blocking, dbl_col,

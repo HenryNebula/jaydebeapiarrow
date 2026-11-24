@@ -38,10 +38,13 @@
       <artifactId>slf4j-api</artifactId>
       <version>2.0.9</version>
     </dependency>
-    <!-- https://mvnrepository.com/artifact/org.slf4j/slf4j-simple -->
+    <!-- Route SLF4J (Arrow, netty, JDBC drivers) into java.util.logging so
+         the packaged logging.properties governs all Java-side logging
+         (issue #140). -->
+    <!-- https://mvnrepository.com/artifact/org.slf4j/slf4j-jdk14 -->
     <dependency>
       <groupId>org.slf4j</groupId>
-      <artifactId>slf4j-simple</artifactId>
+      <artifactId>slf4j-jdk14</artifactId>
       <version>2.0.9</version>
     </dependency>
     <dependency>

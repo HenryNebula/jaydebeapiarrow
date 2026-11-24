@@ -1,16 +1,16 @@
-#-*- coding: utf-8 -*-
 
-import jaydebeapiarrow
 import calendar
 import os
 import unittest
-
+from datetime import timedelta
 from decimal import Decimal
-from datetime import datetime, timedelta
+
+import jaydebeapiarrow
+
 try:
-    from test._base import IntegrationTestBase, _THIS_DIR
+    from test._base import _THIS_DIR, IntegrationTestBase
 except ImportError:
-    from _base import IntegrationTestBase, _THIS_DIR
+    from _base import _THIS_DIR, IntegrationTestBase
 
 
 class DrillTest(IntegrationTestBase, unittest.TestCase):
@@ -259,6 +259,25 @@ class DrillTest(IntegrationTestBase, unittest.TestCase):
             self._cast_datetime('2009-09-11 14:15:22.123', r'%Y-%m-%d %H:%M:%S.%f'),
             19, Decimal('12.90'), Decimal('1.00'))
         ])
+
+    def test_duplicate_column_names_are_preserved(self):
+        """Drill's Calcite validator rejects duplicate select-list aliases
+        AND projecting one column twice ("Column ... is ambiguous"), so the
+        last standard shape is a self-join with qualified references; skip
+        if this Drill build refuses that too."""
+        stmt = ("SELECT x.ACCOUNT_NO, y.ACCOUNT_NO "
+                "FROM dfs.tmp.account x JOIN dfs.tmp.account y "
+                "ON x.ACCOUNT_NO = y.ACCOUNT_NO ORDER BY 1")
+        with self.conn.cursor() as cursor:
+            try:
+                cursor.execute(stmt)
+            except jaydebeapiarrow.DatabaseError:
+                self.skipTest(
+                    "Drill rejects duplicate select-list columns/aliases")
+            self.assertEqual(
+                [d[0].lower() for d in cursor.description],
+                ['account_no', 'account_no'])
+            self.assertEqual(cursor.fetchall(), [(18, 18), (19, 19)])
 
     def test_execute_and_fetchone(self):
         with self.conn.cursor() as cursor:

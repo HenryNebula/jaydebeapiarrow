@@ -1,4 +1,5 @@
 recursive-include test/ *.py *.sql
 recursive-include jaydebeapiarrow/ arrow-jdbc-extension*.jar
+include jaydebeapiarrow/logging.properties
 prune *~
 include README*.rst COPYING*

@@ -399,6 +399,10 @@ public abstract class MockConnection implements Connection {
         break;
       default:
         object = "DummyObject";
+        // Types without a native Arrow representation (OTHER, ROWID, NCLOB,
+        // TIME_WITH_TIMEZONE, DATALINK, ...) are mapped to VARCHAR by the
+        // extension and read via getString(), so stub it here too.
+        Mockito.when(mockResultSet.getString(1)).thenReturn((String) object);
         break;
     }
     Mockito.when(mockResultSet.getObject(1)).thenReturn(object);
@@ -406,6 +410,30 @@ public abstract class MockConnection implements Connection {
     stubPrepareStatement(mockPreparedStatement);
   }
 
+  /** Mock a single-column result whose JDBC metadata reports an arbitrary
+   *  (possibly vendor-specific) type code and type name, with the value read
+   *  via getString(). For codes with no JDBCType enum constant (Oracle -103,
+   *  SQL Server -155, ...) which mockType() cannot represent. */
+  public final void mockTypeWithCode(int jdbcTypeCode, String typeName, String value)
+      throws SQLException {
+    PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
+    Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
+    mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(for code " + jdbcTypeCode + ")");
+    Mockito.when(mockPreparedStatement.getResultSet()).thenReturn(mockResultSet);
+    Mockito.when(mockResultSet.next()).thenReturn(true);
+    ResultSetMetaData mockMetaData = Mockito.mock(ResultSetMetaData.class);
+    Mockito.when(mockMetaData.getColumnCount()).thenReturn(1);
+    Mockito.when(mockMetaData.getColumnType(1)).thenReturn(jdbcTypeCode);
+    Mockito.when(mockMetaData.getColumnTypeName(1)).thenReturn(typeName);
+    Mockito.when(mockMetaData.getColumnName(1)).thenReturn("DummyColumn");
+    Mockito.when(mockMetaData.getColumnLabel(1)).thenReturn("DummyColumn");
+    Mockito.when(mockMetaData.isNullable(1)).thenReturn(mockMetaData.columnNullable);
+    Mockito.when(mockResultSet.getMetaData()).thenReturn(mockMetaData);
+    Mockito.when(mockResultSet.getObject(1)).thenReturn(value);
+    Mockito.when(mockResultSet.getString(1)).thenReturn(value);
+    Mockito.when(mockResultSet.wasNull()).thenReturn(false);
+    stubPrepareStatement(mockPreparedStatement);
+  }
   private List<Object[]> capturedSetObjectArgs;
   private List<Object[]> capturedSetNullArgs;
 
@@ -515,6 +543,14 @@ public abstract class MockConnection implements Connection {
    *  @param values    Java objects to return for each column (via getObject)
    */
   public final void mockMultiColumnResult(int[] sqlTypes, Object[] values) throws SQLException {
+    mockMultiColumnResultNamed(sqlTypes, values, null);
+  }
+
+  /** Same as {@link #mockMultiColumnResult}, but with explicit column names,
+   *  which may repeat to exercise duplicate-name result sets (e.g. "SELECT a, a").
+   *  @param names  column names/labels; null falls back to col_1, col_2, ...
+   */
+  public final void mockMultiColumnResultNamed(int[] sqlTypes, Object[] values, String[] names) throws SQLException {
     PreparedStatement mockPreparedStatement = Mockito.mock(PreparedStatement.class);
     Mockito.when(mockPreparedStatement.execute()).thenReturn(true);
     mockResultSet = Mockito.mock(ResultSet.class, "ResultSet(multi-column)");
@@ -528,8 +564,9 @@ public abstract class MockConnection implements Connection {
       int col = i + 1; // JDBC is 1-based
       Mockito.when(mockMetaData.getColumnType(col)).thenReturn(sqlTypes[i]);
       Mockito.when(mockMetaData.getColumnTypeName(col)).thenReturn(JDBCType.valueOf(sqlTypes[i]).getName());
-      Mockito.when(mockMetaData.getColumnName(col)).thenReturn("col_" + col);
-      Mockito.when(mockMetaData.getColumnLabel(col)).thenReturn("col_" + col);
+      String name = (names == null) ? ("col_" + col) : names[i];
+      Mockito.when(mockMetaData.getColumnName(col)).thenReturn(name);
+      Mockito.when(mockMetaData.getColumnLabel(col)).thenReturn(name);
       Mockito.when(mockMetaData.isNullable(col)).thenReturn(mockMetaData.columnNullableUnknown);
       Mockito.when(mockMetaData.getPrecision(col)).thenReturn(0);
       Mockito.when(mockMetaData.getScale(col)).thenReturn(0);

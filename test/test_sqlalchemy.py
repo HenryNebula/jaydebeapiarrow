@@ -1,4 +1,3 @@
-#-*- coding: utf-8 -*-
 
 # Regression test for issue #115: DBAPITypeObject must be hashable so
 # SQLAlchemy 2.x can use it as a cache key for result-set processors.
@@ -7,18 +6,11 @@
 # SQLAlchemy's cursor result metadata construction.
 
 import unittest
-
 from decimal import Decimal
 
 import jaydebeapiarrow
 
 try:
-    from test._base import _SUPPRESS_LOGGING_ARGS
-except ImportError:
-    from _base import _SUPPRESS_LOGGING_ARGS
-
-try:
-    import sqlalchemy
     from sqlalchemy import create_engine, text
     from sqlalchemy.dialects import registry as _dialect_registry
     from sqlalchemy.engine.default import DefaultDialect
@@ -78,8 +70,7 @@ class SQLAlchemyIntegrationTest(unittest.TestCase):
         # jaydebeapiarrow. The SQLAlchemy engine connects to the same
         # in-memory DB so it sees real cursor.description metadata.
         self._bootstrap = jaydebeapiarrow.connect(
-            _DRIVER_CLASS, _JDBC_URL, _DRIVER_ARGS,
-            jvm_args=_SUPPRESS_LOGGING_ARGS)
+            _DRIVER_CLASS, _JDBC_URL, _DRIVER_ARGS)
         with self._bootstrap.cursor() as cursor:
             cursor.execute("CREATE TABLE sa_test "
                            "(id INT, name VARCHAR(50), balance DECIMAL(10,2))")
@@ -87,8 +78,7 @@ class SQLAlchemyIntegrationTest(unittest.TestCase):
             cursor.execute("INSERT INTO sa_test VALUES (2, 'bob', 12.90)")
 
         self.engine = create_engine(
-            'jaydebeapiarrow:///?jdbc_url=%s&driver_class=%s'
-            % (_JDBC_URL, _DRIVER_CLASS),
+            f'jaydebeapiarrow:///?jdbc_url={_JDBC_URL}&driver_class={_DRIVER_CLASS}',
             poolclass=NullPool,
         )
 

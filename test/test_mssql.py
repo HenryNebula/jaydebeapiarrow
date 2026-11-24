@@ -1,13 +1,13 @@
-#-*- coding: utf-8 -*-
 
-import jaydebeapiarrow
 import os
 import unittest
 
+import jaydebeapiarrow
+
 try:
-    from test._base import IntegrationTestBase, _THIS_DIR
+    from test._base import _THIS_DIR, IntegrationTestBase
 except ImportError:
-    from _base import IntegrationTestBase, _THIS_DIR
+    from _base import _THIS_DIR, IntegrationTestBase
 
 
 class MSSQLTest(IntegrationTestBase, unittest.TestCase):
@@ -31,7 +31,9 @@ class MSSQLTest(IntegrationTestBase, unittest.TestCase):
             db, conn = jaydebeapiarrow, self._quiet_connect(
                 driver, url, driver_args)
         except jpype.JException:
-            self.fail("Can not connect with MS SQL Server. Please check if the instance is up and running.")
+            self.fail(
+                "Can not connect with MS SQL Server. "
+                "Please check if the instance is up and running.")
         else:
             return db, conn
 
@@ -66,3 +68,19 @@ class MSSQLTest(IntegrationTestBase, unittest.TestCase):
     def test_blob_null_value(self):
         """MSSQL JDBC driver rejects NULL parameter binding for VARBINARY columns."""
         self.skipTest("MSSQL JDBC driver does not support NULL for VARBINARY parameter binding")
+
+    def test_vendor_specific_type_codes_read(self):
+        """DATETIMEOFFSET (-155) and SQL_VARIANT (-156) columns must not fail
+        type mapping (issue #149). Queried one column per statement: the
+        driver reports empty metadata names for these casts, and two
+        nameless columns do not survive the Arrow schema."""
+        with self.conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT CAST('2024-01-15T10:30:00' AS DATETIMEOFFSET)")
+            datetimeoffset = cursor.fetchone()[0]
+            cursor.execute("SELECT CAST(123 AS SQL_VARIANT)")
+            sql_variant = cursor.fetchone()[0]
+        self.assertIsInstance(datetimeoffset, str)
+        self.assertIn('2024', datetimeoffset)
+        self.assertIsInstance(sql_variant, str)
+        self.assertEqual(sql_variant, '123')
